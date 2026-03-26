@@ -20,11 +20,115 @@ async function fdGet(path) {
   return res.json();
 }
 
-// Search for a team by name across all competitions
+// ─── Hardcoded team map (football-data.org IDs) ───────────────────────────────
+// Free tier search is unreliable — this guarantees fast, accurate lookups
+const TEAM_MAP = {
+  // Premier League
+  'arsenal': { id: 57, name: 'Arsenal FC' },
+  'chelsea': { id: 61, name: 'Chelsea FC' },
+  'liverpool': { id: 64, name: 'Liverpool FC' },
+  'manchester city': { id: 65, name: 'Manchester City FC' },
+  'man city': { id: 65, name: 'Manchester City FC' },
+  'manchester united': { id: 66, name: 'Manchester United FC' },
+  'man united': { id: 66, name: 'Manchester United FC' },
+  'man utd': { id: 66, name: 'Manchester United FC' },
+  'tottenham': { id: 73, name: 'Tottenham Hotspur FC' },
+  'spurs': { id: 73, name: 'Tottenham Hotspur FC' },
+  'aston villa': { id: 58, name: 'Aston Villa FC' },
+  'newcastle': { id: 67, name: 'Newcastle United FC' },
+  'west ham': { id: 563, name: 'West Ham United FC' },
+  'brighton': { id: 397, name: 'Brighton & Hove Albion FC' },
+  'wolves': { id: 76, name: 'Wolverhampton Wanderers FC' },
+  'wolverhampton': { id: 76, name: 'Wolverhampton Wanderers FC' },
+  'crystal palace': { id: 354, name: 'Crystal Palace FC' },
+  'brentford': { id: 402, name: 'Brentford FC' },
+  'fulham': { id: 63, name: 'Fulham FC' },
+  'everton': { id: 62, name: 'Everton FC' },
+  'nottingham forest': { id: 351, name: 'Nottingham Forest FC' },
+  'forest': { id: 351, name: 'Nottingham Forest FC' },
+  'bournemouth': { id: 1044, name: 'AFC Bournemouth' },
+  'leicester': { id: 338, name: 'Leicester City FC' },
+  'ipswich': { id: 349, name: 'Ipswich Town FC' },
+  'southampton': { id: 340, name: 'Southampton FC' },
+  // Bundesliga
+  'bayern': { id: 5, name: 'FC Bayern München' },
+  'bayern munich': { id: 5, name: 'FC Bayern München' },
+  'dortmund': { id: 4, name: 'Borussia Dortmund' },
+  'borussia dortmund': { id: 4, name: 'Borussia Dortmund' },
+  'rb leipzig': { id: 721, name: 'RB Leipzig' },
+  'leipzig': { id: 721, name: 'RB Leipzig' },
+  'leverkusen': { id: 3, name: 'Bayer 04 Leverkusen' },
+  'bayer leverkusen': { id: 3, name: 'Bayer 04 Leverkusen' },
+  'frankfurt': { id: 19, name: 'Eintracht Frankfurt' },
+  'eintracht frankfurt': { id: 19, name: 'Eintracht Frankfurt' },
+  // La Liga
+  'real madrid': { id: 86, name: 'Real Madrid CF' },
+  'barcelona': { id: 81, name: 'FC Barcelona' },
+  'atletico madrid': { id: 78, name: 'Club Atlético de Madrid' },
+  'atletico': { id: 78, name: 'Club Atlético de Madrid' },
+  'sevilla': { id: 559, name: 'Sevilla FC' },
+  'real sociedad': { id: 92, name: 'Real Sociedad de Fútbol' },
+  'villarreal': { id: 94, name: 'Villarreal CF' },
+  'athletic bilbao': { id: 77, name: 'Athletic Club' },
+  'athletic club': { id: 77, name: 'Athletic Club' },
+  'real betis': { id: 90, name: 'Real Betis Balompié' },
+  // Serie A
+  'juventus': { id: 109, name: 'Juventus FC' },
+  'inter milan': { id: 108, name: 'FC Internazionale Milano' },
+  'inter': { id: 108, name: 'FC Internazionale Milano' },
+  'internazionale': { id: 108, name: 'FC Internazionale Milano' },
+  'ac milan': { id: 98, name: 'AC Milan' },
+  'milan': { id: 98, name: 'AC Milan' },
+  'napoli': { id: 113, name: 'SSC Napoli' },
+  'roma': { id: 100, name: 'AS Roma' },
+  'as roma': { id: 100, name: 'AS Roma' },
+  'lazio': { id: 110, name: 'SS Lazio' },
+  'atalanta': { id: 102, name: 'Atalanta BC' },
+  'fiorentina': { id: 99, name: 'ACF Fiorentina' },
+  // Ligue 1
+  'psg': { id: 524, name: 'Paris Saint-Germain FC' },
+  'paris saint-germain': { id: 524, name: 'Paris Saint-Germain FC' },
+  'paris sg': { id: 524, name: 'Paris Saint-Germain FC' },
+  'marseille': { id: 516, name: 'Olympique de Marseille' },
+  'lyon': { id: 523, name: 'Olympique Lyonnais' },
+  'monaco': { id: 548, name: 'AS Monaco FC' },
+  'lille': { id: 521, name: 'LOSC Lille' },
+  // Others
+  'ajax': { id: 678, name: 'AFC Ajax' },
+  'porto': { id: 503, name: 'FC Porto' },
+  'benfica': { id: 498, name: 'SL Benfica' },
+  'celtic': { id: 264, name: 'Celtic FC' },
+  'rangers': { id: 258, name: 'Rangers FC' },
+};
+
+// Search for a team by name — checks hardcoded map first, then API
 async function searchTeam(name) {
-  const data = await fdGet(`/teams?name=${encodeURIComponent(name)}&limit=5`);
-  if (!data || !data.teams) return null;
-  return data.teams[0] || null;
+  const nameLower = name.toLowerCase().trim();
+
+  // 1. Direct map lookup (instant, reliable)
+  if (TEAM_MAP[nameLower]) {
+    return TEAM_MAP[nameLower];
+  }
+
+  // 2. Partial map match (e.g. "Man City" inside "manchester city")
+  for (const [key, team] of Object.entries(TEAM_MAP)) {
+    if (key.includes(nameLower) || nameLower.includes(key)) {
+      return team;
+    }
+  }
+
+  // 3. API fallback for unlisted teams
+  const data = await fdGet(`/teams?search=${encodeURIComponent(name)}&limit=10`);
+  if (data && data.teams && data.teams.length > 0) {
+    const match = data.teams.find(t => {
+      const teamName = (t.name || '').toLowerCase();
+      const shortName = (t.shortName || '').toLowerCase();
+      return teamName.includes(nameLower) || shortName.includes(nameLower);
+    });
+    if (match) return match;
+  }
+
+  return null;
 }
 
 // Get recent matches for a team (last N)
