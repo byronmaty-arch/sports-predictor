@@ -131,11 +131,33 @@ async function searchTeam(name) {
   return null;
 }
 
-// Get recent matches for a team (last N)
+// League competition codes — exclude cups, friendlies, play-offs
+const LEAGUE_CODES = new Set([
+  'PL',   // Premier League
+  'BL1',  // Bundesliga
+  'SA',   // Serie A
+  'PD',   // La Liga
+  'FL1',  // Ligue 1
+  'PPL',  // Primeira Liga (Portugal)
+  'DED',  // Eredivisie (Netherlands)
+  'BSA',  // Brasileirão
+  'CL',   // Champions League (group/knockout — still meaningful)
+  'EL',   // Europa League
+  'EC',   // European Championship
+]);
+
+// Get recent LEAGUE matches for a team (excludes cups & friendlies)
 async function getTeamMatches(teamId, limit = 10) {
-  const data = await fdGet(`/teams/${teamId}/matches?status=FINISHED&limit=${limit}`);
+  // Fetch more than needed so we have enough after filtering cups out
+  const data = await fdGet(`/teams/${teamId}/matches?status=FINISHED&limit=${limit * 3}`);
   if (!data || !data.matches) return [];
-  return data.matches;
+
+  // Keep only league/European matches — filter out domestic cups
+  const leagueOnly = data.matches.filter(m =>
+    m.competition && LEAGUE_CODES.has(m.competition.code)
+  );
+
+  return leagueOnly.slice(0, limit);
 }
 
 // Get upcoming match between two teams
