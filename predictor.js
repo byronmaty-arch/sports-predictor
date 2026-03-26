@@ -3,7 +3,7 @@
  * Combines data fetching + Poisson model + value analysis
  */
 
-const { searchTeam, getTeamMatches, getOdds, computeTeamStats } = require('./fetcher');
+const { searchTeam, getTeamMatches, getOdds, computeTeamStats, getTeamXG } = require('./fetcher');
 const { predictMatch, findValue } = require('./poisson');
 
 // Average goals per match across top European leagues (used as baseline)
@@ -20,14 +20,16 @@ async function analyzMatch(homeTeamName, awayTeamName) {
     return { error: 'Could not find one or both teams. Try using full team names.' };
   }
 
-  // 2. Get recent matches
-  const [homeMatches, awayMatches] = await Promise.all([
+  // 2. Get recent matches + xG from Understat in parallel
+  const [homeMatches, awayMatches, homeXG, awayXG] = await Promise.all([
     getTeamMatches(homeTeamData.id, 10),
     getTeamMatches(awayTeamData.id, 10),
+    getTeamXG(homeTeamData.name),
+    getTeamXG(awayTeamData.name),
   ]);
 
-  const homeStats = computeTeamStats(homeMatches, homeTeamData.id);
-  const awayStats = computeTeamStats(awayMatches, awayTeamData.id);
+  const homeStats = computeTeamStats(homeMatches, homeTeamData.id, homeXG);
+  const awayStats = computeTeamStats(awayMatches, awayTeamData.id, awayXG);
 
   if (!homeStats || !awayStats) {
     return { error: 'Not enough match data to make a prediction.' };

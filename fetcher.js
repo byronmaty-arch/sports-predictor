@@ -190,30 +190,114 @@ async function getOdds(homeTeam, awayTeam) {
   }
 }
 
-// ─── Web scrape fallback (no API key needed) ──────────────────────────────────
+// ─── Understat xG scraper ─────────────────────────────────────────────────────
+// Understat embeds all match xG data as JSON inside the HTML page.
+// No API key required — completely free.
 
-// Scrape basic form from transfermarkt or similar public site
-async function scrapeTeamForm(teamName) {
+const UNDERSTAT_TEAM_MAP = {
+  // Premier League
+  'arsenal fc': 'Arsenal', 'arsenal': 'Arsenal',
+  'chelsea fc': 'Chelsea', 'chelsea': 'Chelsea',
+  'liverpool fc': 'Liverpool', 'liverpool': 'Liverpool',
+  'manchester city fc': 'Manchester_City', 'manchester city': 'Manchester_City', 'man city': 'Manchester_City',
+  'manchester united fc': 'Manchester_United', 'manchester united': 'Manchester_United', 'man united': 'Manchester_United', 'man utd': 'Manchester_United',
+  'tottenham hotspur fc': 'Tottenham', 'tottenham': 'Tottenham', 'spurs': 'Tottenham',
+  'aston villa fc': 'Aston_Villa', 'aston villa': 'Aston_Villa',
+  'newcastle united fc': 'Newcastle_United', 'newcastle': 'Newcastle_United',
+  'west ham united fc': 'West_Ham', 'west ham': 'West_Ham',
+  'brighton & hove albion fc': 'Brighton', 'brighton': 'Brighton',
+  'wolverhampton wanderers fc': 'Wolverhampton_Wanderers', 'wolves': 'Wolverhampton_Wanderers', 'wolverhampton': 'Wolverhampton_Wanderers',
+  'crystal palace fc': 'Crystal_Palace', 'crystal palace': 'Crystal_Palace',
+  'brentford fc': 'Brentford', 'brentford': 'Brentford',
+  'fulham fc': 'Fulham', 'fulham': 'Fulham',
+  'everton fc': 'Everton', 'everton': 'Everton',
+  'nottingham forest fc': 'Nottingham_Forest', 'nottingham forest': 'Nottingham_Forest', 'forest': 'Nottingham_Forest',
+  'afc bournemouth': 'Bournemouth', 'bournemouth': 'Bournemouth',
+  'leicester city fc': 'Leicester', 'leicester': 'Leicester',
+  'ipswich town fc': 'Ipswich', 'ipswich': 'Ipswich',
+  'southampton fc': 'Southampton', 'southampton': 'Southampton',
+  // Bundesliga
+  'fc bayern münchen': 'Bayern_Munich', 'bayern munich': 'Bayern_Munich', 'bayern': 'Bayern_Munich',
+  'borussia dortmund': 'Dortmund', 'dortmund': 'Dortmund',
+  'rb leipzig': 'RB_Leipzig', 'leipzig': 'RB_Leipzig',
+  'bayer 04 leverkusen': 'Bayer_Leverkusen', 'bayer leverkusen': 'Bayer_Leverkusen', 'leverkusen': 'Bayer_Leverkusen',
+  'eintracht frankfurt': 'Eintracht_Frankfurt', 'frankfurt': 'Eintracht_Frankfurt',
+  // La Liga
+  'real madrid cf': 'Real_Madrid', 'real madrid': 'Real_Madrid',
+  'fc barcelona': 'Barcelona', 'barcelona': 'Barcelona',
+  'club atlético de madrid': 'Atletico_Madrid', 'atletico madrid': 'Atletico_Madrid', 'atletico': 'Atletico_Madrid',
+  'sevilla fc': 'Sevilla', 'sevilla': 'Sevilla',
+  'real sociedad de fútbol': 'Real_Sociedad', 'real sociedad': 'Real_Sociedad',
+  'villarreal cf': 'Villarreal', 'villarreal': 'Villarreal',
+  'athletic club': 'Athletic_Club', 'athletic bilbao': 'Athletic_Club',
+  'real betis balompié': 'Real_Betis', 'real betis': 'Real_Betis',
+  // Serie A
+  'juventus fc': 'Juventus', 'juventus': 'Juventus',
+  'fc internazionale milano': 'Internazionale', 'inter milan': 'Internazionale', 'inter': 'Internazionale', 'internazionale': 'Internazionale',
+  'ac milan': 'AC_Milan', 'milan': 'AC_Milan',
+  'ssc napoli': 'Napoli', 'napoli': 'Napoli',
+  'as roma': 'Roma', 'roma': 'Roma',
+  'ss lazio': 'Lazio', 'lazio': 'Lazio',
+  'atalanta bc': 'Atalanta', 'atalanta': 'Atalanta',
+  'acf fiorentina': 'Fiorentina', 'fiorentina': 'Fiorentina',
+  // Ligue 1
+  'paris saint-germain fc': 'Paris_Saint_Germain', 'psg': 'Paris_Saint_Germain', 'paris saint-germain': 'Paris_Saint_Germain',
+  'olympique de marseille': 'Marseille', 'marseille': 'Marseille',
+  'olympique lyonnais': 'Lyon', 'lyon': 'Lyon',
+  'as monaco fc': 'Monaco', 'monaco': 'Monaco',
+  'losc lille': 'Lille', 'lille': 'Lille',
+};
+
+// Determine current football season year (Aug–Jul cycle)
+function currentSeason() {
+  const now = new Date();
+  return now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+}
+
+// Fetch xG data from Understat for a team
+// Returns array of { date, xgFor, xgAgainst } or null on failure
+async function getTeamXG(teamName) {
+  const key = teamName.toLowerCase().trim();
+  const understatName = UNDERSTAT_TEAM_MAP[key];
+  if (!understatName) return null;
+
+  const season = currentSeason();
+
   try {
-    // Use a simple search to get form data
-    const query = encodeURIComponent(`${teamName} last 5 matches results 2024 2025`);
-    const res = await fetch(`https://www.google.com/search?q=${query}`, {
+    const url = `https://understat.com/team/${understatName}/${season}`;
+    const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
       },
     });
-    // We parse the snippet — very basic
+    if (!res.ok) return null;
+
     const html = await res.text();
-    // Extract result snippets (W/D/L pattern)
-    const results = [];
-    const patterns = html.matchAll(/(\d+)[\s-]+(\d+)/g);
-    for (const m of patterns) {
-      if (results.length >= 5) break;
-      results.push({ score: `${m[1]}-${m[2]}` });
-    }
-    return results;
+
+    // Understat embeds data as: var matchesData = JSON.parse('...')
+    const raw = html.match(/var matchesData\s*=\s*JSON\.parse\('(.+?)'\)/s);
+    if (!raw) return null;
+
+    // Decode \xNN hex escapes and unescape quotes
+    const jsonStr = raw[1]
+      .replace(/\\x([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/\\\\/g, '\\')
+      .replace(/\\'/g, "'");
+
+    const matches = JSON.parse(jsonStr);
+
+    // Only return completed matches with valid xG
+    return matches
+      .filter(m => m.isResult && m.xG && m.xG.h != null && m.xG.a != null)
+      .map(m => ({
+        date: m.datetime.split(' ')[0],        // "2025-08-17"
+        side: m.side,                           // 'h' or 'a'
+        xgFor:     parseFloat(m.side === 'h' ? m.xG.h : m.xG.a),
+        xgAgainst: parseFloat(m.side === 'h' ? m.xG.a : m.xG.h),
+      }));
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -222,18 +306,20 @@ async function scrapeTeamForm(teamName) {
 // Decay rate of 0.1 means a match 10 games ago carries ~37% of the weight
 // of the most recent match (e^-1 ≈ 0.368).
 
-function computeTeamStats(matches, teamId) {
+// xG data is an array of { date, xgFor, xgAgainst } from Understat (optional)
+function computeTeamStats(matches, teamId, xgData = null) {
   if (!matches.length) return null;
 
-  const DECAY_RATE = 0.1; // Exponential decay per match position
+  const DECAY_RATE = 0.1; // e^(-0.1 * i): match 10 games ago = 37% weight
 
-  // Sort newest first so index 0 = most recent
+  // Sort newest first
   const sorted = [...matches].sort(
     (a, b) => new Date(b.utcDate) - new Date(a.utcDate)
   );
 
   let totalWeight = 0;
   let weightedScored = 0, weightedConceded = 0;
+  let xgTotalWeight = 0, weightedXgFor = 0, weightedXgAgainst = 0;
   let wins = 0, draws = 0, losses = 0;
   const form = [];
 
@@ -241,40 +327,51 @@ function computeTeamStats(matches, teamId) {
     const isHome = m.homeTeam.id === teamId;
     const scored   = isHome ? m.score.fullTime.home : m.score.fullTime.away;
     const conceded = isHome ? m.score.fullTime.away : m.score.fullTime.home;
-
     if (scored === null || conceded === null) return;
 
-    // Exponential decay weight — index 0 (most recent) = weight 1.0
     const weight = Math.exp(-DECAY_RATE * i);
-    totalWeight    += weight;
+    totalWeight      += weight;
     weightedScored   += scored   * weight;
     weightedConceded += conceded * weight;
 
-    if (scored > conceded)      { wins++;   form.push('W'); }
-    else if (scored === conceded){ draws++;  form.push('D'); }
-    else                         { losses++; form.push('L'); }
+    // Try to match with Understat xG by date
+    if (xgData) {
+      const matchDate = new Date(m.utcDate).toISOString().split('T')[0];
+      const xgMatch = xgData.find(x => x.date === matchDate);
+      if (xgMatch) {
+        xgTotalWeight    += weight;
+        weightedXgFor    += xgMatch.xgFor     * weight;
+        weightedXgAgainst += xgMatch.xgAgainst * weight;
+      }
+    }
+
+    if (scored > conceded)       { wins++;   form.push('W'); }
+    else if (scored === conceded) { draws++;  form.push('D'); }
+    else                          { losses++; form.push('L'); }
   });
 
   if (totalWeight === 0) return null;
   const played = wins + draws + losses;
 
-  // Opponent-adjusted xG proxy:
-  // Weight goals scored against strong defences more than goals vs weak ones.
-  // We approximate defensive strength by how few goals the opponent concedes
-  // on average — captured implicitly through the decay-weighted averages.
-  const avgScored   = weightedScored   / totalWeight;
-  const avgConceded = weightedConceded / totalWeight;
+  // Use xG averages if we have enough coverage (≥5 matches matched)
+  const hasXG = xgTotalWeight > 0 && xgData && xgData.length >= 5;
+  const avgScored   = hasXG
+    ? weightedXgFor     / xgTotalWeight   // True xG for
+    : weightedScored    / totalWeight;    // Fallback: actual goals
+  const avgConceded = hasXG
+    ? weightedXgAgainst / xgTotalWeight   // True xG against
+    : weightedConceded  / totalWeight;
 
   return {
     played,
     wins, draws, losses,
     avgScored,
     avgConceded,
+    usingXG: hasXG,  // Flag so formatter can show ⚡xG or 📊Goals
     form: form.slice(0, 5).join(''),
     points: wins * 3 + draws,
-    // Confidence indicator: more matches = more reliable
     confidence: Math.min(played / 10, 1.0),
   };
 }
 
-module.exports = { searchTeam, getTeamMatches, getUpcomingMatch, getOdds, computeTeamStats };
+module.exports = { searchTeam, getTeamMatches, getUpcomingMatch, getOdds, computeTeamStats, getTeamXG };
