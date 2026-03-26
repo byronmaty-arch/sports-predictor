@@ -8,6 +8,7 @@ const { TELEGRAM_TOKEN } = require('./config');
 const { analyzMatch, quickPredict } = require('./predictor');
 const { formatPrediction, formatHelp, formatQuickPredict } = require('./formatter');
 const { parseInjuryList } = require('./injuries');
+const { searchTeam, getRawMatches } = require('./fetcher');
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
@@ -17,6 +18,27 @@ console.log('⚽ Sports Predictor Bot started...');
 
 bot.onText(/\/(start|help)/, (msg) => {
   bot.sendMessage(msg.chat.id, formatHelp(), { parse_mode: 'HTML' });
+});
+
+// ─── /debug [Team] — shows raw API matches and competition codes ──────────────
+
+bot.onText(/\/debug (.+)/i, async (msg, match) => {
+  const teamName = match[1].trim();
+  const teamData = await searchTeam(teamName);
+  if (!teamData) {
+    return bot.sendMessage(msg.chat.id, `❌ Team not found: ${teamName}`);
+  }
+  const raw = await getRawMatches(teamData.id, 15);
+  if (!raw.length) {
+    return bot.sendMessage(msg.chat.id, `❌ No matches returned from API for ${teamData.name}`);
+  }
+  const lines = [`🔍 <b>${teamData.name}</b> — last ${raw.length} API matches:\n`];
+  for (const m of raw) {
+    const tick = m.inLeagueFilter ? '✅' : '❌';
+    lines.push(`${tick} ${m.date} | ${m.competition}`);
+    lines.push(`   ${m.home} ${m.score} ${m.away}`);
+  }
+  bot.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'HTML' });
 });
 
 // ─── /predict [Home] vs [Away] ────────────────────────────────────────────────

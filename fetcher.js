@@ -503,8 +503,22 @@ function computeRestFactor(days) {
   return 0.96;
 }
 
+// Debug: returns raw matches from API before any filtering
+async function getRawMatches(teamId, limit = 20) {
+  const data = await fdGet(`/teams/${teamId}/matches?status=FINISHED&limit=${limit}`);
+  if (!data || !data.matches) return [];
+  return data.matches.map(m => ({
+    date: m.utcDate.split('T')[0],
+    competition: m.competition ? `${m.competition.name} (${m.competition.code})` : 'UNKNOWN',
+    home: m.homeTeam.shortName || m.homeTeam.name,
+    away: m.awayTeam.shortName || m.awayTeam.name,
+    score: `${m.score.fullTime.home}-${m.score.fullTime.away}`,
+    inLeagueFilter: m.competition ? LEAGUE_CODES.has(m.competition.code) : false,
+  }));
+}
+
 module.exports = {
   searchTeam, getTeamMatches, getUpcomingMatch, getOdds,
   computeTeamStats, getTeamXG, getH2H, computeH2HStats,
-  getDaysSinceLastMatch, computeRestFactor,
+  getDaysSinceLastMatch, computeRestFactor, getRawMatches,
 };
