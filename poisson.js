@@ -10,13 +10,25 @@ function poissonProb(lambda, k) {
   return Math.exp(logP);
 }
 
-// Build score probability matrix up to maxGoals per team
+// Dixon-Coles tau correction for low-scoring scorelines
+// Captures the real-world negative correlation between goals at 0-0, 1-0, 0-1, 1-1
+// rho = -0.1 is the empirically validated value from the original DC paper
+function dixonColesTau(h, a, lambdaHome, lambdaAway, rho = -0.1) {
+  if (h === 0 && a === 0) return 1 - lambdaHome * lambdaAway * rho;
+  if (h === 1 && a === 0) return 1 + lambdaAway * rho;
+  if (h === 0 && a === 1) return 1 + lambdaHome * rho;
+  if (h === 1 && a === 1) return 1 - rho;
+  return 1; // No correction needed for scorelines > 1-1
+}
+
+// Build score probability matrix with full Dixon-Coles correction
 function scoreMatrix(lambdaHome, lambdaAway, maxGoals = 8) {
   const matrix = [];
   for (let h = 0; h <= maxGoals; h++) {
     matrix[h] = [];
     for (let a = 0; a <= maxGoals; a++) {
-      matrix[h][a] = poissonProb(lambdaHome, h) * poissonProb(lambdaAway, a);
+      const tau = dixonColesTau(h, a, lambdaHome, lambdaAway);
+      matrix[h][a] = poissonProb(lambdaHome, h) * poissonProb(lambdaAway, a) * tau;
     }
   }
   return matrix;
