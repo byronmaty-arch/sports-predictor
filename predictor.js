@@ -41,11 +41,14 @@ async function analyzMatch(homeTeamName, awayTeamName) {
   const awayAttack = awayStats.avgScored / LEAGUE_AVG_GOALS;
   const awayDefence = awayStats.avgConceded / LEAGUE_AVG_GOALS;
 
-  // 4. Run Poisson model
+  // 4. Run Poisson model with regression to mean
+  // Confidence = average of both teams' data confidence (0–1 scale)
+  const confidence = (homeStats.confidence + awayStats.confidence) / 2;
   const prediction = predictMatch(
     { attackStrength: homeAttack, defenceWeakness: homeDefence },
     { attackStrength: awayAttack, defenceWeakness: awayDefence },
-    LEAGUE_AVG_GOALS
+    LEAGUE_AVG_GOALS,
+    confidence
   );
 
   // 5. Get bookmaker odds

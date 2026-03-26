@@ -77,8 +77,43 @@ function findValue(modelProb, bookmakerOdds, threshold = 0.05) {
   return { edge, hasValue: edge > threshold, impliedProb };
 }
 
+// ─── Regression to the Mean ───────────────────────────────────────────────────
+// Blends model probabilities with long-run football base rates.
+// Prevents extreme predictions caused by compounding form/xG factors.
+//
+// Base rates from 10+ seasons of top European league data:
+//   Home Win: 45%  |  Draw: 25%  |  Away Win: 30%
+//
+// Confidence weight (max 0.75) scales with how many matches we have data for.
+// We never fully trust the model alone — football is too unpredictable.
+//
+// Formula: final = (modelProb × weight) + (baseRate × (1 − weight))
+
+const BASE_RATES = { homeWin: 0.45, draw: 0.25, awayWin: 0.30 };
+const MAX_MODEL_WEIGHT = 0.75; // Even with perfect data, cap model influence at 75%
+
+function regressToMean(probs, confidence) {
+  // Scale confidence (0–1) to model weight (0–MAX_MODEL_WEIGHT)
+  const weight = confidence * MAX_MODEL_WEIGHT;
+
+  const regressed = {
+    homeWin: (probs.homeWin * weight) + (BASE_RATES.homeWin * (1 - weight)),
+    draw:    (probs.draw    * weight) + (BASE_RATES.draw    * (1 - weight)),
+    awayWin: (probs.awayWin * weight) + (BASE_RATES.awayWin * (1 - weight)),
+  };
+
+  // Re-normalise so they sum to exactly 1.0
+  const total = regressed.homeWin + regressed.draw + regressed.awayWin;
+  return {
+    homeWin: regressed.homeWin / total,
+    draw:    regressed.draw    / total,
+    awayWin: regressed.awayWin / total,
+  };
+}
+
 // Predict match from raw stats
-function predictMatch(homeStats, awayStats, leagueAvg) {
+// confidence = min(matchesPlayed / 10, 1.0) passed in from computeTeamStats
+function predictMatch(homeStats, awayStats, leagueAvg, confidence = 1.0) {
   const HOME_ADVANTAGE = 1.15; // ~15% home boost (football average)
 
   const lambdaHome = expectedGoals(
@@ -94,11 +129,15 @@ function predictMatch(homeStats, awayStats, leagueAvg) {
     1.0
   );
 
-  const probs = matchProbabilities(lambdaHome, lambdaAway);
+  const rawProbs = matchProbabilities(lambdaHome, lambdaAway);
+
+  // Apply regression — pulls extreme probabilities toward realistic base rates
+  const probs = regressToMean(rawProbs, confidence);
 
   return {
     expectedGoals: { home: lambdaHome, away: lambdaAway },
     probabilities: probs,
+    rawProbabilities: rawProbs,   // Keep raw for transparency
     mostLikely: getMostLikelyScore(lambdaHome, lambdaAway),
   };
 }
