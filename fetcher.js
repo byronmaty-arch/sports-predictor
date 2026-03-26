@@ -131,7 +131,8 @@ async function searchTeam(name) {
   return null;
 }
 
-// League competition codes — exclude cups, friendlies, play-offs
+// Domestic league competition codes only — excludes cups AND European comps
+// Form/stats should match what BBC/Sky/FotMob show (domestic league only)
 const LEAGUE_CODES = new Set([
   'PL',   // Premier League
   'BL1',  // Bundesliga
@@ -141,21 +142,21 @@ const LEAGUE_CODES = new Set([
   'PPL',  // Primeira Liga (Portugal)
   'DED',  // Eredivisie (Netherlands)
   'BSA',  // Brasileirão
-  'CL',   // Champions League (group/knockout — still meaningful)
-  'EL',   // Europa League
-  'EC',   // European Championship
 ]);
 
-// Get recent LEAGUE matches for a team (excludes cups & friendlies)
+// Get recent LEAGUE matches for a team (excludes cups, European & friendlies)
 async function getTeamMatches(teamId, limit = 10) {
   // Fetch more than needed so we have enough after filtering cups out
-  const data = await fdGet(`/teams/${teamId}/matches?status=FINISHED&limit=${limit * 3}`);
+  const data = await fdGet(`/teams/${teamId}/matches?status=FINISHED&limit=${limit * 5}`);
   if (!data || !data.matches) return [];
 
-  // Keep only league/European matches — filter out domestic cups
+  // Keep only domestic league matches — filter out cups AND European competition
   const leagueOnly = data.matches.filter(m =>
     m.competition && LEAGUE_CODES.has(m.competition.code)
   );
+
+  // Sort newest first BEFORE slicing — API returns oldest first
+  leagueOnly.sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate));
 
   return leagueOnly.slice(0, limit);
 }
