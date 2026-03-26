@@ -306,20 +306,26 @@ async function getTeamXG(teamName) {
 // Decay rate of 0.1 means a match 10 games ago carries ~37% of the weight
 // of the most recent match (e^-1 ≈ 0.368).
 
-// xG data is an array of { date, xgFor, xgAgainst } from Understat (optional)
+// xG data is an array of { date, side, xgFor, xgAgainst } from Understat (optional)
 function computeTeamStats(matches, teamId, xgData = null) {
   if (!matches.length) return null;
 
-  const DECAY_RATE = 0.1; // e^(-0.1 * i): match 10 games ago = 37% weight
+  const DECAY_RATE = 0.1;
 
-  // Sort newest first
   const sorted = [...matches].sort(
     (a, b) => new Date(b.utcDate) - new Date(a.utcDate)
   );
 
-  let totalWeight = 0;
-  let weightedScored = 0, weightedConceded = 0;
+  // Overall accumulators
+  let totalWeight = 0, weightedScored = 0, weightedConceded = 0;
   let xgTotalWeight = 0, weightedXgFor = 0, weightedXgAgainst = 0;
+
+  // Home/Away split accumulators
+  let homeWeight = 0, homeScored = 0, homeConceded = 0;
+  let awayWeight = 0, awayScored = 0, awayConceded = 0;
+  let homeXgW = 0, homeXgFor = 0, homeXgAgainst = 0;
+  let awayXgW = 0, awayXgFor = 0, awayXgAgainst = 0;
+
   let wins = 0, draws = 0, losses = 0;
   const form = [];
 
@@ -330,48 +336,116 @@ function computeTeamStats(matches, teamId, xgData = null) {
     if (scored === null || conceded === null) return;
 
     const weight = Math.exp(-DECAY_RATE * i);
+
+    // Overall
     totalWeight      += weight;
     weightedScored   += scored   * weight;
     weightedConceded += conceded * weight;
 
-    // Try to match with Understat xG by date
+    // Home/Away split
+    if (isHome) {
+      homeWeight += weight; homeScored += scored * weight; homeConceded += conceded * weight;
+    } else {
+      awayWeight += weight; awayScored += scored * weight; awayConceded += conceded * weight;
+    }
+
+    // xG matching by date
     if (xgData) {
       const matchDate = new Date(m.utcDate).toISOString().split('T')[0];
-      const xgMatch = xgData.find(x => x.date === matchDate);
-      if (xgMatch) {
-        xgTotalWeight    += weight;
-        weightedXgFor    += xgMatch.xgFor     * weight;
-        weightedXgAgainst += xgMatch.xgAgainst * weight;
+      const xg = xgData.find(x => x.date === matchDate);
+      if (xg) {
+        xgTotalWeight     += weight;
+        weightedXgFor     += xg.xgFor     * weight;
+        weightedXgAgainst += xg.xgAgainst * weight;
+        if (isHome) {
+          homeXgW += weight; homeXgFor += xg.xgFor * weight; homeXgAgainst += xg.xgAgainst * weight;
+        } else {
+          awayXgW += weight; awayXgFor += xg.xgFor * weight; awayXgAgainst += xg.xgAgainst * weight;
+        }
       }
     }
 
-    if (scored > conceded)       { wins++;   form.push('W'); }
-    else if (scored === conceded) { draws++;  form.push('D'); }
+    if (scored > conceded)       { wins++;  form.push('W'); }
+    else if (scored === conceded) { draws++; form.push('D'); }
     else                          { losses++; form.push('L'); }
   });
 
   if (totalWeight === 0) return null;
   const played = wins + draws + losses;
+  const hasXG  = xgTotalWeight > 0 && xgData && xgData.length >= 5;
 
-  // Use xG averages if we have enough coverage (≥5 matches matched)
-  const hasXG = xgTotalWeight > 0 && xgData && xgData.length >= 5;
-  const avgScored   = hasXG
-    ? weightedXgFor     / xgTotalWeight   // True xG for
-    : weightedScored    / totalWeight;    // Fallback: actual goals
-  const avgConceded = hasXG
-    ? weightedXgAgainst / xgTotalWeight   // True xG against
-    : weightedConceded  / totalWeight;
+  // Overall averages (xG preferred)
+  const avgScored   = hasXG ? weightedXgFor     / xgTotalWeight : weightedScored   / totalWeight;
+  const avgConceded = hasXG ? weightedXgAgainst / xgTotalWeight : weightedConceded / totalWeight;
+
+  // Home-specific averages
+  const homeAvgScored   = homeXgW > 0 ? homeXgFor     / homeXgW
+                        : homeWeight > 0 ? homeScored  / homeWeight : avgScored;
+  const homeAvgConceded = homeXgW > 0 ? homeXgAgainst / homeXgW
+                        : homeWeight > 0 ? homeConceded / homeWeight : avgConceded;
+
+  // Away-specific averages
+  const awayAvgScored   = awayXgW > 0 ? awayXgFor     / awayXgW
+                        : awayWeight > 0 ? awayScored  / awayWeight : avgScored;
+  const awayAvgConceded = awayXgW > 0 ? awayXgAgainst / awayXgW
+                        : awayWeight > 0 ? awayConceded / awayWeight : avgConceded;
 
   return {
-    played,
-    wins, draws, losses,
-    avgScored,
-    avgConceded,
-    usingXG: hasXG,  // Flag so formatter can show ⚡xG or 📊Goals
+    played, wins, draws, losses,
+    avgScored, avgConceded,
+    homeAvgScored, homeAvgConceded,   // Used when this team plays at home
+    awayAvgScored, awayAvgConceded,   // Used when this team plays away
+    usingXG: hasXG,
     form: form.slice(0, 5).join(''),
     points: wins * 3 + draws,
     confidence: Math.min(played / 10, 1.0),
   };
 }
 
-module.exports = { searchTeam, getTeamMatches, getUpcomingMatch, getOdds, computeTeamStats, getTeamXG };
+// ─── Head-to-Head ─────────────────────────────────────────────────────────────
+
+async function getH2H(homeTeamId, awayTeamId) {
+  // Fetch last 20 matches for the home team and filter for clashes with away team
+  const data = await fdGet(`/teams/${homeTeamId}/matches?status=FINISHED&limit=20`);
+  if (!data || !data.matches) return [];
+
+  return data.matches
+    .filter(m =>
+      (m.homeTeam.id === homeTeamId && m.awayTeam.id === awayTeamId) ||
+      (m.homeTeam.id === awayTeamId && m.awayTeam.id === homeTeamId)
+    )
+    .slice(0, 6); // Last 6 H2H meetings is enough
+}
+
+// Compute H2H win rates from the perspective of homeTeamId
+function computeH2HStats(h2hMatches, homeTeamId) {
+  if (!h2hMatches.length) return null;
+
+  let wins = 0, draws = 0, losses = 0;
+
+  for (const m of h2hMatches) {
+    const hs = m.score.fullTime.home;
+    const as = m.score.fullTime.away;
+    if (hs === null || as === null) continue;
+
+    const teamWasHome = m.homeTeam.id === homeTeamId;
+    const teamScored   = teamWasHome ? hs : as;
+    const teamConceded = teamWasHome ? as : hs;
+
+    if (teamScored > teamConceded)       wins++;
+    else if (teamScored === teamConceded) draws++;
+    else                                  losses++;
+  }
+
+  const total = wins + draws + losses;
+  if (total === 0) return null;
+
+  return {
+    matches: total,
+    homeWinRate: wins   / total,
+    drawRate:    draws  / total,
+    awayWinRate: losses / total,
+  };
+}
+
+module.exports = { searchTeam, getTeamMatches, getUpcomingMatch, getOdds, computeTeamStats, getTeamXG, getH2H, computeH2HStats };

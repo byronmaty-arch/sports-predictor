@@ -3,7 +3,7 @@
  * Combines data fetching + Poisson model + value analysis
  */
 
-const { searchTeam, getTeamMatches, getOdds, computeTeamStats, getTeamXG } = require('./fetcher');
+const { searchTeam, getTeamMatches, getOdds, computeTeamStats, getTeamXG, getH2H, computeH2HStats } = require('./fetcher');
 const { predictMatch, findValue } = require('./poisson');
 
 // Average goals per match across top European leagues (used as baseline)
@@ -20,12 +20,13 @@ async function analyzMatch(homeTeamName, awayTeamName) {
     return { error: 'Could not find one or both teams. Try using full team names.' };
   }
 
-  // 2. Get recent matches + xG from Understat in parallel
-  const [homeMatches, awayMatches, homeXG, awayXG] = await Promise.all([
+  // 2. Fetch matches, xG and H2H all in parallel
+  const [homeMatches, awayMatches, homeXG, awayXG, h2hMatches] = await Promise.all([
     getTeamMatches(homeTeamData.id, 10),
     getTeamMatches(awayTeamData.id, 10),
     getTeamXG(homeTeamData.name),
     getTeamXG(awayTeamData.name),
+    getH2H(homeTeamData.id, awayTeamData.id),
   ]);
 
   const homeStats = computeTeamStats(homeMatches, homeTeamData.id, homeXG);
@@ -35,14 +36,14 @@ async function analyzMatch(homeTeamName, awayTeamName) {
     return { error: 'Not enough match data to make a prediction.' };
   }
 
-  // 3. Compute attack/defence strengths relative to league average
-  const homeAttack = homeStats.avgScored / LEAGUE_AVG_GOALS;
-  const homeDefence = homeStats.avgConceded / LEAGUE_AVG_GOALS;
-  const awayAttack = awayStats.avgScored / LEAGUE_AVG_GOALS;
-  const awayDefence = awayStats.avgConceded / LEAGUE_AVG_GOALS;
+  // 3. Use home-specific stats for home team, away-specific for away team
+  // This is more accurate than overall averages
+  const homeAttack  = homeStats.homeAvgScored   / LEAGUE_AVG_GOALS;
+  const homeDefence = homeStats.homeAvgConceded  / LEAGUE_AVG_GOALS;
+  const awayAttack  = awayStats.awayAvgScored   / LEAGUE_AVG_GOALS;
+  const awayDefence = awayStats.awayAvgConceded  / LEAGUE_AVG_GOALS;
 
   // 4. Run Poisson model with regression to mean
-  // Confidence = average of both teams' data confidence (0–1 scale)
   const confidence = (homeStats.confidence + awayStats.confidence) / 2;
   const prediction = predictMatch(
     { attackStrength: homeAttack, defenceWeakness: homeDefence },
@@ -51,10 +52,29 @@ async function analyzMatch(homeTeamName, awayTeamName) {
     confidence
   );
 
-  // 5. Get bookmaker odds
+  // 5. Apply H2H adjustment (15% weight if we have ≥3 meetings)
+  const h2h = computeH2HStats(h2hMatches, homeTeamData.id);
+  if (h2h && h2h.matches >= 3) {
+    const H2H_WEIGHT = 0.15;
+    const p = prediction.probabilities;
+    const blended = {
+      homeWin: p.homeWin * (1 - H2H_WEIGHT) + h2h.homeWinRate * H2H_WEIGHT,
+      draw:    p.draw    * (1 - H2H_WEIGHT) + h2h.drawRate    * H2H_WEIGHT,
+      awayWin: p.awayWin * (1 - H2H_WEIGHT) + h2h.awayWinRate * H2H_WEIGHT,
+    };
+    // Re-normalise
+    const total = blended.homeWin + blended.draw + blended.awayWin;
+    prediction.probabilities = {
+      homeWin: blended.homeWin / total,
+      draw:    blended.draw    / total,
+      awayWin: blended.awayWin / total,
+    };
+  }
+
+  // 6. Get bookmaker odds
   const odds = await getOdds(homeTeamName, awayTeamName);
 
-  // 6. Value analysis
+  // 7. Value analysis
   let valueAnalysis = null;
   if (odds) {
     const homeValue = findValue(prediction.probabilities.homeWin, odds.home);
@@ -68,6 +88,7 @@ async function analyzMatch(homeTeamName, awayTeamName) {
     awayTeam: awayTeamData.name,
     homeStats,
     awayStats,
+    h2h,
     prediction,
     odds,
     valueAnalysis,
