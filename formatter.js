@@ -19,13 +19,36 @@ function formatForm(formStr) {
 function formatPrediction(data) {
   if (data.error) return `❌ ${data.error}`;
 
-  const { homeTeam, awayTeam, homeStats, awayStats, prediction, odds, valueAnalysis } = data;
+  const { homeTeam, awayTeam, homeStats, awayStats, prediction, odds, valueAnalysis, homeInjuryFactor, awayInjuryFactor, h2h } = data;
   const { probabilities, expectedGoals, mostLikely } = prediction;
 
   const lines = [];
 
   lines.push(`⚽ <b>${homeTeam} vs ${awayTeam}</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━`);
+
+  // Injury report
+  const hasInjuries = (homeInjuryFactor?.found?.length || homeInjuryFactor?.unknown?.length ||
+                       awayInjuryFactor?.found?.length || awayInjuryFactor?.unknown?.length);
+  if (hasInjuries) {
+    lines.push(`\n🤕 <b>Injury Adjustments</b>`);
+    if (homeInjuryFactor) {
+      const names = [...(homeInjuryFactor.found.map(p => p.name)), ...(homeInjuryFactor.unknown)].join(', ');
+      lines.push(`🏠 ${homeTeam} missing: ${names}`);
+      lines.push(`   → Attack ▼${pct(homeInjuryFactor.totalAttackImpact)}  Defence ▲${pct(homeInjuryFactor.totalDefenceImpact)}`);
+    }
+    if (awayInjuryFactor) {
+      const names = [...(awayInjuryFactor.found.map(p => p.name)), ...(awayInjuryFactor.unknown)].join(', ');
+      lines.push(`✈️  ${awayTeam} missing: ${names}`);
+      lines.push(`   → Attack ▼${pct(awayInjuryFactor.totalAttackImpact)}  Defence ▲${pct(awayInjuryFactor.totalDefenceImpact)}`);
+    }
+  }
+
+  // H2H
+  if (h2h && h2h.matches >= 3) {
+    lines.push(`\n🔁 <b>Head-to-Head (last ${h2h.matches} meetings)</b>`);
+    lines.push(`🏠 ${homeTeam} wins: ${pct(h2h.homeWinRate)}  🤝 Draws: ${pct(h2h.drawRate)}  ✈️ ${awayTeam} wins: ${pct(h2h.awayWinRate)}`);
+  }
 
   // Form
   lines.push(`\n📊 <b>Recent Form (last 5)</b>`);
@@ -103,8 +126,12 @@ function formatHelp() {
 
 <b>Commands:</b>
 /predict [Home] vs [Away]
-  → Full match analysis & prediction
+  → Full analysis: xG, form, H2H, Poisson model
   → Example: <code>/predict Arsenal vs Chelsea</code>
+
+/predict [Home] vs [Away] --home-out "[players]" --away-out "[players]"
+  → With injury overrides
+  → Example: <code>/predict Liverpool vs Man City --home-out "Salah" --away-out "Haaland, De Bruyne"</code>
 
 /quick [home_scored] [home_conceded] [away_scored] [away_conceded]
   → Quick prediction with manual stats
@@ -113,14 +140,16 @@ function formatHelp() {
 /help → Show this message
 
 <b>How it works:</b>
-• Fetches recent form & stats via football-data.org
-• Applies Poisson distribution model (industry standard)
-• Compares against bookmaker odds to find value
-• Works for any league with available data
+• True xG data from Understat (no API key needed)
+• Dixon-Coles Poisson model with exponential decay
+• Home/Away specific stats + Head-to-Head history
+• Regression to mean prevents extreme predictions
+• Injury impact adjustments for key player absences
 
 <b>Tips:</b>
 • Use full team names for best results
-• Probabilities above 60% are considered strong signals
+• Add injuries for more accurate predictions
+• Probabilities above 60% are strong signals
 • Value bets = where our model finds edge vs bookmakers`;
 }
 

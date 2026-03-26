@@ -7,6 +7,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const { TELEGRAM_TOKEN } = require('./config');
 const { analyzMatch, quickPredict } = require('./predictor');
 const { formatPrediction, formatHelp, formatQuickPredict } = require('./formatter');
+const { parseInjuryList } = require('./injuries');
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
@@ -21,22 +22,47 @@ bot.onText(/\/(start|help)/, (msg) => {
 // ─── /predict [Home] vs [Away] ────────────────────────────────────────────────
 
 bot.onText(/\/predict (.+)/i, async (msg, match) => {
-  const input = match[1].trim();
-  const parts = input.split(/\s+vs\s+/i);
+  let input = match[1].trim();
+
+  // Extract --home-out and --away-out flags (with or without quotes)
+  const homeOutMatch = input.match(/--home-out\s+"([^"]+)"|--home-out\s+([\w\s,]+?)(?=\s+--|$)/i);
+  const awayOutMatch = input.match(/--away-out\s+"([^"]+)"|--away-out\s+([\w\s,]+?)(?=\s+--|$)/i);
+
+  const homeInjuries = homeOutMatch ? parseInjuryList(homeOutMatch[1] || homeOutMatch[2]) : [];
+  const awayInjuries = awayOutMatch ? parseInjuryList(awayOutMatch[1] || awayOutMatch[2]) : [];
+
+  // Strip flags to get clean team input
+  const cleanInput = input
+    .replace(/--home-out\s+"[^"]+"/gi, '')
+    .replace(/--away-out\s+"[^"]+"/gi, '')
+    .replace(/--home-out\s+[\w\s,]+/gi, '')
+    .replace(/--away-out\s+[\w\s,]+/gi, '')
+    .trim();
+
+  const parts = cleanInput.split(/\s+vs\s+/i);
 
   if (parts.length !== 2) {
     return bot.sendMessage(msg.chat.id,
-      '❌ Format: /predict <Home Team> vs <Away Team>\nExample: /predict Arsenal vs Chelsea'
+      '❌ Format: /predict &lt;Home&gt; vs &lt;Away&gt;\n' +
+      'With injuries: /predict Arsenal vs Chelsea --home-out "Saka" --away-out "Palmer, Jackson"\n\n' +
+      'Example: <code>/predict Liverpool vs Man City --home-out "Salah" --away-out "Haaland"</code>',
+      { parse_mode: 'HTML' }
     );
   }
 
   const [homeTeam, awayTeam] = parts.map(s => s.trim());
+  const injuryNote = [
+    homeInjuries.length ? `🏠 Out: ${homeInjuries.join(', ')}` : '',
+    awayInjuries.length ? `✈️ Out: ${awayInjuries.join(', ')}` : '',
+  ].filter(Boolean).join(' | ');
+
   const loadingMsg = await bot.sendMessage(msg.chat.id,
-    `⏳ Analyzing <b>${homeTeam} vs ${awayTeam}</b>...`, { parse_mode: 'HTML' }
+    `⏳ Analyzing <b>${homeTeam} vs ${awayTeam}</b>${injuryNote ? `\n🤕 ${injuryNote}` : ''}...`,
+    { parse_mode: 'HTML' }
   );
 
   try {
-    const result = await analyzMatch(homeTeam, awayTeam);
+    const result = await analyzMatch(homeTeam, awayTeam, { homeInjuries, awayInjuries });
     const text = formatPrediction(result);
     await bot.editMessageText(text, {
       chat_id: msg.chat.id,

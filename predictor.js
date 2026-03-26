@@ -5,11 +5,13 @@
 
 const { searchTeam, getTeamMatches, getOdds, computeTeamStats, getTeamXG, getH2H, computeH2HStats } = require('./fetcher');
 const { predictMatch, findValue } = require('./poisson');
+const { computeInjuryFactor } = require('./injuries');
 
 // Average goals per match across top European leagues (used as baseline)
 const LEAGUE_AVG_GOALS = 1.35; // per team per match (roughly 2.7 total)
 
-async function analyzMatch(homeTeamName, awayTeamName) {
+async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
+  const { homeInjuries = [], awayInjuries = [] } = options;
   // 1. Find teams
   const [homeTeamData, awayTeamData] = await Promise.all([
     searchTeam(homeTeamName),
@@ -37,11 +39,14 @@ async function analyzMatch(homeTeamName, awayTeamName) {
   }
 
   // 3. Use home-specific stats for home team, away-specific for away team
-  // This is more accurate than overall averages
-  const homeAttack  = homeStats.homeAvgScored   / LEAGUE_AVG_GOALS;
-  const homeDefence = homeStats.homeAvgConceded  / LEAGUE_AVG_GOALS;
-  const awayAttack  = awayStats.awayAvgScored   / LEAGUE_AVG_GOALS;
-  const awayDefence = awayStats.awayAvgConceded  / LEAGUE_AVG_GOALS;
+  const homeInjuryFactor = computeInjuryFactor(homeInjuries);
+  const awayInjuryFactor = computeInjuryFactor(awayInjuries);
+
+  // Apply injury multipliers to xG — missing players = fewer goals / weaker defence
+  const homeAttack  = (homeStats.homeAvgScored   / LEAGUE_AVG_GOALS) * (homeInjuryFactor?.attackMultiplier  ?? 1);
+  const homeDefence = (homeStats.homeAvgConceded  / LEAGUE_AVG_GOALS) * (homeInjuryFactor?.defenceMultiplier ?? 1);
+  const awayAttack  = (awayStats.awayAvgScored   / LEAGUE_AVG_GOALS) * (awayInjuryFactor?.attackMultiplier  ?? 1);
+  const awayDefence = (awayStats.awayAvgConceded  / LEAGUE_AVG_GOALS) * (awayInjuryFactor?.defenceMultiplier ?? 1);
 
   // 4. Run Poisson model with regression to mean
   const confidence = (homeStats.confidence + awayStats.confidence) / 2;
@@ -92,6 +97,8 @@ async function analyzMatch(homeTeamName, awayTeamName) {
     prediction,
     odds,
     valueAnalysis,
+    homeInjuryFactor,
+    awayInjuryFactor,
   };
 }
 
