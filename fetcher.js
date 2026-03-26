@@ -448,4 +448,41 @@ function computeH2HStats(h2hMatches, homeTeamId) {
   };
 }
 
-module.exports = { searchTeam, getTeamMatches, getUpcomingMatch, getOdds, computeTeamStats, getTeamXG, getH2H, computeH2HStats };
+// ─── Rest Days ────────────────────────────────────────────────────────────────
+
+// Returns days since the team's most recent match (from already-fetched matches)
+function getDaysSinceLastMatch(matches) {
+  if (!matches || !matches.length) return null;
+  const sorted = [...matches].sort(
+    (a, b) => new Date(b.utcDate) - new Date(a.utcDate)
+  );
+  const lastMatchDate = new Date(sorted[0].utcDate);
+  const now = new Date();
+  return Math.floor((now - lastMatchDate) / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Fatigue/rust multiplier based on days of rest.
+ *
+ *  ≤2 days  : 0.91 — 3rd match in 7 days, heavily fatigued
+ *   3 days  : 0.95 — back-to-back fixture congestion
+ *   4 days  : 0.97 — slightly tired
+ *  5–10 days: 1.00 — ideal preparation window
+ * 11–14 days: 0.99 — minor rustiness
+ *  15+ days : 0.96 — long break, likely disrupted rhythm or injuries
+ */
+function computeRestFactor(days) {
+  if (days === null) return 1.00;
+  if (days <= 2)  return 0.91;
+  if (days <= 3)  return 0.95;
+  if (days <= 4)  return 0.97;
+  if (days <= 10) return 1.00;
+  if (days <= 14) return 0.99;
+  return 0.96;
+}
+
+module.exports = {
+  searchTeam, getTeamMatches, getUpcomingMatch, getOdds,
+  computeTeamStats, getTeamXG, getH2H, computeH2HStats,
+  getDaysSinceLastMatch, computeRestFactor,
+};

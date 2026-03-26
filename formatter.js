@@ -16,10 +16,20 @@ function formatForm(formStr) {
   return formStr.split('').map(formEmoji).join('');
 }
 
+function restLabel(days, factor) {
+  if (days === null) return 'Unknown';
+  if (factor <= 0.91) return `${days}d ⚠️ Fatigued`;
+  if (factor <= 0.95) return `${days}d 😓 Tired`;
+  if (factor <= 0.97) return `${days}d 😐 Slight fatigue`;
+  if (factor >= 1.00 && days <= 10) return `${days}d ✅ Well rested`;
+  if (factor < 1.00) return `${days}d 🟡 Slight rust`;
+  return `${days}d`;
+}
+
 function formatPrediction(data) {
   if (data.error) return `❌ ${data.error}`;
 
-  const { homeTeam, awayTeam, homeStats, awayStats, prediction, odds, valueAnalysis, homeInjuryFactor, awayInjuryFactor, h2h } = data;
+  const { homeTeam, awayTeam, homeStats, awayStats, prediction, odds, valueAnalysis, homeInjuryFactor, awayInjuryFactor, h2h, elo, rest } = data;
   const { probabilities, expectedGoals, mostLikely } = prediction;
 
   const lines = [];
@@ -42,6 +52,20 @@ function formatPrediction(data) {
       lines.push(`✈️  ${awayTeam} missing: ${names}`);
       lines.push(`   → Attack ▼${pct(awayInjuryFactor.totalAttackImpact)}  Defence ▲${pct(awayInjuryFactor.totalDefenceImpact)}`);
     }
+  }
+
+  // Elo ratings
+  if (elo) {
+    lines.push(`\n⚡ <b>Elo Ratings</b>`);
+    lines.push(`🏠 ${homeTeam}: ${elo.home} <i>(${elo.homeTier})</i>`);
+    lines.push(`✈️  ${awayTeam}: ${elo.away} <i>(${elo.awayTier})</i>`);
+  }
+
+  // Rest days
+  if (rest) {
+    lines.push(`\n😴 <b>Rest &amp; Fatigue</b>`);
+    lines.push(`🏠 ${homeTeam}: ${restLabel(rest.homeDays, rest.homeRestFactor)}`);
+    lines.push(`✈️  ${awayTeam}: ${restLabel(rest.awayDays, rest.awayRestFactor)}`);
   }
 
   // H2H

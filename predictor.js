@@ -3,9 +3,10 @@
  * Combines data fetching + Poisson model + value analysis
  */
 
-const { searchTeam, getTeamMatches, getOdds, computeTeamStats, getTeamXG, getH2H, computeH2HStats } = require('./fetcher');
+const { searchTeam, getTeamMatches, getOdds, computeTeamStats, getTeamXG, getH2H, computeH2HStats, getDaysSinceLastMatch, computeRestFactor } = require('./fetcher');
 const { predictMatch, findValue } = require('./poisson');
 const { computeInjuryFactor } = require('./injuries');
+const { calculateElo, eloStrengthMultiplier, eloLabel } = require('./elo');
 
 // Average goals per match across top European leagues (used as baseline)
 const LEAGUE_AVG_GOALS = 1.35; // per team per match (roughly 2.7 total)
@@ -38,15 +39,43 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
     return { error: 'Not enough match data to make a prediction.' };
   }
 
-  // 3. Use home-specific stats for home team, away-specific for away team
+  // 3. Elo ratings — calculated from seed + recent match history
+  const homeElo = calculateElo(homeTeamData.id, homeMatches);
+  const awayElo = calculateElo(awayTeamData.id, awayMatches);
+  const homeEloMult = eloStrengthMultiplier(homeElo, awayElo);  // >1 if home stronger
+  const awayEloMult = eloStrengthMultiplier(awayElo, homeElo);  // >1 if away stronger
+
+  // 4. Rest days — fatigue/rust multiplier from days since last match
+  const homeDaysRest = getDaysSinceLastMatch(homeMatches);
+  const awayDaysRest = getDaysSinceLastMatch(awayMatches);
+  const homeRestFactor = computeRestFactor(homeDaysRest);
+  const awayRestFactor = computeRestFactor(awayDaysRest);
+
+  // 5. Injury factors
   const homeInjuryFactor = computeInjuryFactor(homeInjuries);
   const awayInjuryFactor = computeInjuryFactor(awayInjuries);
 
-  // Apply injury multipliers to xG — missing players = fewer goals / weaker defence
-  const homeAttack  = (homeStats.homeAvgScored   / LEAGUE_AVG_GOALS) * (homeInjuryFactor?.attackMultiplier  ?? 1);
-  const homeDefence = (homeStats.homeAvgConceded  / LEAGUE_AVG_GOALS) * (homeInjuryFactor?.defenceMultiplier ?? 1);
-  const awayAttack  = (awayStats.awayAvgScored   / LEAGUE_AVG_GOALS) * (awayInjuryFactor?.attackMultiplier  ?? 1);
-  const awayDefence = (awayStats.awayAvgConceded  / LEAGUE_AVG_GOALS) * (awayInjuryFactor?.defenceMultiplier ?? 1);
+  // 6. Compose all multipliers into final attack/defence strengths
+  //    Order: base xG → Elo adjustment → rest factor → injury factor
+  const homeAttack  = (homeStats.homeAvgScored  / LEAGUE_AVG_GOALS)
+    * homeEloMult
+    * homeRestFactor
+    * (homeInjuryFactor?.attackMultiplier  ?? 1);
+
+  const homeDefence = (homeStats.homeAvgConceded / LEAGUE_AVG_GOALS)
+    * (1 / homeEloMult)          // Stronger teams concede less
+    * homeRestFactor
+    * (homeInjuryFactor?.defenceMultiplier ?? 1);
+
+  const awayAttack  = (awayStats.awayAvgScored  / LEAGUE_AVG_GOALS)
+    * awayEloMult
+    * awayRestFactor
+    * (awayInjuryFactor?.attackMultiplier  ?? 1);
+
+  const awayDefence = (awayStats.awayAvgConceded / LEAGUE_AVG_GOALS)
+    * (1 / awayEloMult)
+    * awayRestFactor
+    * (awayInjuryFactor?.defenceMultiplier ?? 1);
 
   // 4. Run Poisson model with regression to mean
   const confidence = (homeStats.confidence + awayStats.confidence) / 2;
@@ -99,6 +128,14 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
     valueAnalysis,
     homeInjuryFactor,
     awayInjuryFactor,
+    elo: {
+      home: homeElo, homeTier: eloLabel(homeElo),
+      away: awayElo, awayTier: eloLabel(awayElo),
+    },
+    rest: {
+      homeDays: homeDaysRest, homeRestFactor,
+      awayDays: awayDaysRest, awayRestFactor,
+    },
   };
 }
 
