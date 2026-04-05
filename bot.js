@@ -9,7 +9,7 @@ const { TELEGRAM_TOKEN, TELEGRAM_CHAT_ID } = require('./config');
 const { analyzMatch, quickPredict } = require('./predictor');
 const { formatPrediction, formatHelp, formatQuickPredict, formatSlip, formatSlipWhatsApp } = require('./formatter');
 const { parseInjuryList } = require('./injuries');
-const { searchTeam, getRawMatches } = require('./fetcher');
+const { searchTeam, getRawMatches, getTodaysFixtures } = require('./fetcher');
 const { generateDailySlip } = require('./slip');
 const { sendWhatsApp, isConfigured: whatsAppConfigured } = require('./whatsapp');
 
@@ -20,23 +20,34 @@ console.log('⚽ Sports Predictor Bot started...');
 // ─── Daily slip helper ────────────────────────────────────────────────────────
 
 async function sendDailySlip(chatId, { notifyWhatsApp = false } = {}) {
-  const statusMsg = await bot.sendMessage(chatId,
-    `⏳ <b>Generating today's betting slip...</b>\nFetching fixtures and analysing each match.\nThis takes ~3 minutes due to API rate limits. I'll update this message when done.`,
-    { parse_mode: 'HTML' }
-  );
-
   try {
-    const slip = await generateDailySlip();
+    // Check for fixtures first — respond immediately if none found
+    const fixtures = await getTodaysFixtures();
 
-    // Send to Telegram
+    if (!fixtures.length) {
+      const msg = `⚽ <b>No matches found today.</b>\nNo fixtures scheduled in covered leagues. Check back tomorrow!`;
+      await bot.sendMessage(chatId, msg, { parse_mode: 'HTML' });
+      if (notifyWhatsApp && whatsAppConfigured()) {
+        await sendWhatsApp('⚽ No matches found today. Check back tomorrow!');
+      }
+      return;
+    }
+
+    // Fixtures found — show loading message then analyse
+    const statusMsg = await bot.sendMessage(chatId,
+      `⏳ <b>Generating today's betting slip...</b>\nFound <b>${fixtures.length}</b> fixture(s). Analysing each match.\nThis takes ~3 minutes due to API rate limits. I'll update this message when done.`,
+      { parse_mode: 'HTML' }
+    );
+
+    const slip = await generateDailySlip();
     const text = formatSlip(slip);
+
     await bot.editMessageText(text, {
       chat_id: chatId,
       message_id: statusMsg.message_id,
       parse_mode: 'HTML',
     });
 
-    // Send to WhatsApp if enabled and this is an auto/scheduled slip
     if (notifyWhatsApp && whatsAppConfigured()) {
       const waText = formatSlipWhatsApp(slip);
       await sendWhatsApp(waText);
@@ -44,10 +55,7 @@ async function sendDailySlip(chatId, { notifyWhatsApp = false } = {}) {
     }
   } catch (err) {
     console.error('[slip] Fatal error:', err);
-    bot.editMessageText('❌ Failed to generate slip. Check logs.', {
-      chat_id: chatId,
-      message_id: statusMsg.message_id,
-    });
+    bot.sendMessage(chatId, '❌ Failed to generate slip. Please try again.');
   }
 }
 
