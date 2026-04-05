@@ -4,15 +4,42 @@
  */
 
 const TelegramBot = require('node-telegram-bot-api');
-const { TELEGRAM_TOKEN } = require('./config');
+const cron = require('node-cron');
+const { TELEGRAM_TOKEN, TELEGRAM_CHAT_ID } = require('./config');
 const { analyzMatch, quickPredict } = require('./predictor');
-const { formatPrediction, formatHelp, formatQuickPredict } = require('./formatter');
+const { formatPrediction, formatHelp, formatQuickPredict, formatSlip } = require('./formatter');
 const { parseInjuryList } = require('./injuries');
 const { searchTeam, getRawMatches } = require('./fetcher');
+const { generateDailySlip } = require('./slip');
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
 console.log('⚽ Sports Predictor Bot started...');
+
+// ─── Daily slip helper ────────────────────────────────────────────────────────
+
+async function sendDailySlip(chatId) {
+  const statusMsg = await bot.sendMessage(chatId,
+    `⏳ <b>Generating today's betting slip...</b>\nFetching fixtures and analysing each match.\nThis takes ~3 minutes due to API rate limits. I'll update this message when done.`,
+    { parse_mode: 'HTML' }
+  );
+
+  try {
+    const slip = await generateDailySlip();
+    const text = formatSlip(slip);
+    await bot.editMessageText(text, {
+      chat_id: chatId,
+      message_id: statusMsg.message_id,
+      parse_mode: 'HTML',
+    });
+  } catch (err) {
+    console.error('[slip] Fatal error:', err);
+    bot.editMessageText('❌ Failed to generate slip. Check logs.', {
+      chat_id: chatId,
+      message_id: statusMsg.message_id,
+    });
+  }
+}
 
 // ─── /start & /help ──────────────────────────────────────────────────────────
 
@@ -39,6 +66,12 @@ bot.onText(/\/debug (.+)/i, async (msg, match) => {
     lines.push(`   ${m.home} ${m.score} ${m.away}`);
   }
   bot.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'HTML' });
+});
+
+// ─── /slip — generate today's betting slip on demand ─────────────────────────
+
+bot.onText(/\/slip/, async (msg) => {
+  await sendDailySlip(msg.chat.id);
 });
 
 // ─── /predict [Home] vs [Away] ────────────────────────────────────────────────
@@ -169,6 +202,21 @@ bot.on('message', async (msg) => {
     });
   }
 });
+
+// ─── Daily slip — auto-send at 08:00 EAT (05:00 UTC) every day ───────────────
+// Cron format: minute hour day month weekday
+// '0 5 * * *' = every day at 05:00 UTC = 08:00 Uganda time (EAT = UTC+3)
+
+cron.schedule('0 5 * * *', async () => {
+  console.log('[cron] Sending daily slip...');
+  if (TELEGRAM_CHAT_ID) {
+    await sendDailySlip(TELEGRAM_CHAT_ID);
+  } else {
+    console.warn('[cron] TELEGRAM_CHAT_ID not set — skipping auto slip.');
+  }
+}, { timezone: 'UTC' });
+
+console.log('📅 Daily slip scheduled for 08:00 EAT (05:00 UTC) every day.');
 
 // ─── Error handling ───────────────────────────────────────────────────────────
 

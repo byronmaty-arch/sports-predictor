@@ -149,6 +149,11 @@ function formatHelp() {
   return `🤖 <b>Sports Predictor Bot</b>
 
 <b>Commands:</b>
+/slip
+  → Auto-fetch today's fixtures &amp; generate daily betting slip
+  → Picks: High Confidence (≥65%), Hedges (≥80% DC), Overs (≥75%)
+  → Also sent automatically every day at 08:00 EAT
+
 /predict [Home] vs [Away]
   → Full analysis: xG, form, H2H, Poisson model
   → Example: <code>/predict Arsenal vs Chelsea</code>
@@ -194,4 +199,93 @@ function formatQuickPredict(homeTeam, awayTeam, prediction) {
   return lines.join('\n');
 }
 
-module.exports = { formatPrediction, formatHelp, formatQuickPredict };
+// ─── Daily Betting Slip ───────────────────────────────────────────────────────
+
+function formatSlip(slip) {
+  const lines = [];
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'short', year: 'numeric',
+    timeZone: 'Africa/Kampala',
+  });
+
+  lines.push(`📋 <b>DAILY BETTING SLIP</b>`);
+  lines.push(`📅 ${dateStr}`);
+  lines.push(`━━━━━━━━━━━━━━━━━━━━`);
+
+  if (slip.noFixtures) {
+    lines.push(`\n⚠️ No fixtures found today in covered leagues.`);
+    lines.push(`Use /predict [Home] vs [Away] for manual predictions.`);
+    return lines.join('\n');
+  }
+
+  lines.push(`⚽ Analysed <b>${slip.analyzedCount}</b> fixture(s)`);
+
+  if (!slip.highConfidence.length && !slip.hedges.length && !slip.overs.length) {
+    lines.push(`\n⚠️ No picks meet confidence thresholds today.`);
+    lines.push(`All matches are too close to call — skip today or use /predict for details.`);
+    return lines.join('\n');
+  }
+
+  let n = 1;
+
+  // ── HIGH CONFIDENCE picks ─────────────────────────────────────────────────
+  if (slip.highConfidence.length) {
+    lines.push(`\n🟢 <b>HIGH CONFIDENCE (≥65%)</b>`);
+    for (const pick of slip.highConfidence) {
+      const ko = kickoffEAT(pick.fixture.kickoff);
+      lines.push(``);
+      lines.push(`<b>${n}. ${pick.result.homeTeam} vs ${pick.result.awayTeam}</b>`);
+      lines.push(`   ✅ <b>${pick.bet.label}</b>  —  ${pct(pick.bet.prob)}`);
+      lines.push(`   🏟 ${pick.fixture.competition}  ·  ⏰ ${ko} EAT`);
+      lines.push(`   💡 ${pick.reason}`);
+      lines.push(`   📊 xG ${pick.result.prediction.expectedGoals.home.toFixed(1)}–${pick.result.prediction.expectedGoals.away.toFixed(1)}  ·  Likely: ${pick.result.prediction.mostLikely}`);
+      n++;
+    }
+  }
+
+  // ── HEDGE picks ───────────────────────────────────────────────────────────
+  if (slip.hedges.length) {
+    lines.push(`\n🛡️ <b>HEDGE — Double Chance (≥80%)</b>`);
+    for (const pick of slip.hedges) {
+      const ko = kickoffEAT(pick.fixture.kickoff);
+      lines.push(``);
+      lines.push(`<b>${n}. ${pick.result.homeTeam} vs ${pick.result.awayTeam}</b>`);
+      lines.push(`   🛡️ <b>${pick.bet.label}</b>  —  ${pct(pick.bet.prob)}`);
+      lines.push(`   🏟 ${pick.fixture.competition}  ·  ⏰ ${ko} EAT`);
+      lines.push(`   💡 ${pick.reason}`);
+      lines.push(`   📊 xG ${pick.result.prediction.expectedGoals.home.toFixed(1)}–${pick.result.prediction.expectedGoals.away.toFixed(1)}`);
+      n++;
+    }
+  }
+
+  // ── OVERS picks ───────────────────────────────────────────────────────────
+  if (slip.overs.length) {
+    lines.push(`\n⚽ <b>GOALS — Over/Under (≥75%)</b>`);
+    for (const pick of slip.overs) {
+      const ko = kickoffEAT(pick.fixture.kickoff);
+      lines.push(``);
+      lines.push(`<b>${n}. ${pick.result.homeTeam} vs ${pick.result.awayTeam}</b>`);
+      lines.push(`   ⚽ <b>${pick.bet.line}</b>  —  ${pct(pick.bet.prob)}`);
+      lines.push(`   🏟 ${pick.fixture.competition}  ·  ⏰ ${ko} EAT`);
+      lines.push(`   💡 ${pick.reason}`);
+      lines.push(`   📊 O1.5: ${pct(pick.overProbs.over15)}  O2.5: ${pct(pick.overProbs.over25)}  O3.5: ${pct(pick.overProbs.over35)}  BTTS: ${pct(pick.overProbs.btts)}`);
+      n++;
+    }
+  }
+
+  lines.push(``);
+  lines.push(`━━━━━━━━━━━━━━━━━━━━`);
+  lines.push(`📌 <b>${n - 1} pick(s) today</b>`);
+  lines.push(`⚠️ <i>Model predictions only. Bet responsibly.</i>`);
+
+  return lines.join('\n');
+}
+
+function kickoffEAT(utcDate) {
+  return new Date(utcDate).toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Kampala',
+  });
+}
+
+module.exports = { formatPrediction, formatHelp, formatQuickPredict, formatSlip };

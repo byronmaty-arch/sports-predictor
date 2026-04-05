@@ -101,6 +101,12 @@ const TEAM_MAP = {
   'rangers': { id: 258, name: 'Rangers FC' },
 };
 
+// Reverse map: team ID → TEAM_MAP key (used by slip generator for fixture lookup)
+const TEAM_ID_TO_KEY = {};
+for (const [key, val] of Object.entries(TEAM_MAP)) {
+  if (!TEAM_ID_TO_KEY[val.id]) TEAM_ID_TO_KEY[val.id] = key;
+}
+
 // Search for a team by name — checks hardcoded map first, then API
 async function searchTeam(name) {
   const nameLower = name.toLowerCase().trim();
@@ -159,6 +165,27 @@ async function getTeamMatches(teamId, limit = 10) {
   leagueOnly.sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate));
 
   return leagueOnly.slice(0, limit);
+}
+
+// Fetch today's fixtures across all covered leagues (for daily slip)
+async function getTodaysFixtures() {
+  const today = new Date().toISOString().split('T')[0];
+  const data = await fdGet(`/matches?dateFrom=${today}&dateTo=${today}&status=SCHEDULED`);
+  if (!data || !data.matches) return [];
+
+  return data.matches
+    .filter(m => m.competition && LEAGUE_CODES.has(m.competition.code))
+    .filter(m => TEAM_ID_TO_KEY[m.homeTeam.id] && TEAM_ID_TO_KEY[m.awayTeam.id])
+    .map(m => ({
+      homeKey: TEAM_ID_TO_KEY[m.homeTeam.id],
+      awayKey: TEAM_ID_TO_KEY[m.awayTeam.id],
+      homeTeamName: m.homeTeam.name,
+      awayTeamName: m.awayTeam.name,
+      kickoff: m.utcDate,
+      competition: m.competition.name,
+      competitionCode: m.competition.code,
+      matchId: m.id,
+    }));
 }
 
 // Get upcoming match between two teams
@@ -522,4 +549,5 @@ module.exports = {
   searchTeam, getTeamMatches, getUpcomingMatch, getOdds,
   computeTeamStats, getTeamXG, getH2H, computeH2HStats,
   getDaysSinceLastMatch, computeRestFactor, getRawMatches,
+  getTodaysFixtures,
 };

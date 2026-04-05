@@ -153,4 +153,24 @@ function getMostLikelyScore(lambdaHome, lambdaAway, maxGoals = 6) {
   return `${best.h}-${best.a}`;
 }
 
-module.exports = { predictMatch, matchProbabilities, findValue, oddsToProb };
+// Over/Under goal probabilities derived from the Poisson score matrix
+// Returns P(OVER 1.5), P(OVER 2.5), P(OVER 3.5), and Both Teams to Score
+function overProbabilities(lambdaHome, lambdaAway) {
+  const matrix = scoreMatrix(lambdaHome, lambdaAway);
+  let over15 = 0, over25 = 0, over35 = 0, btts = 0;
+
+  for (let h = 0; h < matrix.length; h++) {
+    for (let a = 0; a < matrix[h].length; a++) {
+      const p = matrix[h][a];
+      const total = h + a;
+      if (total > 1) over15 += p;
+      if (total > 2) over25 += p;
+      if (total > 3) over35 += p;
+      if (h > 0 && a > 0) btts += p;
+    }
+  }
+
+  return { over15, over25, over35, btts };
+}
+
+module.exports = { predictMatch, matchProbabilities, findValue, oddsToProb, overProbabilities };
