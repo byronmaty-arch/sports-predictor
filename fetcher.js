@@ -239,25 +239,42 @@ async function getTeamMatches(teamId, limit = 10) {
   return leagueOnly.slice(0, limit);
 }
 
+// Leagues to query individually (general /matches endpoint unreliable on free tier)
+const FIXTURE_LEAGUES = ['PL', 'BL1', 'SA', 'PD', 'FL1', 'PPL', 'DED'];
+const FIXTURE_LEAGUE_DELAY = 7000; // 7s between league queries (free tier: 10 req/min)
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 // Fetch today's fixtures across all covered leagues (for daily slip)
+// Queries each competition individually — the general /matches endpoint is unreliable on free tier
 async function getTodaysFixtures() {
   const today = new Date().toISOString().split('T')[0];
-  const data = await fdGet(`/matches?dateFrom=${today}&dateTo=${today}&status=SCHEDULED`);
-  if (!data || !data.matches) return [];
+  const all = [];
 
-  return data.matches
-    .filter(m => m.competition && LEAGUE_CODES.has(m.competition.code))
-    .filter(m => TEAM_ID_TO_KEY[m.homeTeam.id] && TEAM_ID_TO_KEY[m.awayTeam.id])
-    .map(m => ({
-      homeKey: TEAM_ID_TO_KEY[m.homeTeam.id],
-      awayKey: TEAM_ID_TO_KEY[m.awayTeam.id],
-      homeTeamName: m.homeTeam.name,
-      awayTeamName: m.awayTeam.name,
-      kickoff: m.utcDate,
-      competition: m.competition.name,
-      competitionCode: m.competition.code,
-      matchId: m.id,
-    }));
+  for (let i = 0; i < FIXTURE_LEAGUES.length; i++) {
+    const code = FIXTURE_LEAGUES[i];
+    const data = await fdGet(`/competitions/${code}/matches?status=SCHEDULED&dateFrom=${today}&dateTo=${today}`);
+    if (data && data.matches) {
+      const fixtures = data.matches
+        .filter(m => TEAM_ID_TO_KEY[m.homeTeam.id] && TEAM_ID_TO_KEY[m.awayTeam.id])
+        .map(m => ({
+          homeKey: TEAM_ID_TO_KEY[m.homeTeam.id],
+          awayKey: TEAM_ID_TO_KEY[m.awayTeam.id],
+          homeTeamName: m.homeTeam.name,
+          awayTeamName: m.awayTeam.name,
+          kickoff: m.utcDate,
+          competition: m.competition.name,
+          competitionCode: m.competition.code,
+          matchId: m.id,
+        }));
+      all.push(...fixtures);
+    }
+    if (i < FIXTURE_LEAGUES.length - 1) await sleep(FIXTURE_LEAGUE_DELAY);
+  }
+
+  // Sort by kickoff time ascending
+  all.sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff));
+  return all;
 }
 
 // Get upcoming match between two teams
