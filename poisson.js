@@ -143,10 +143,13 @@ function predictMatch(homeStats, awayStats, leagueAvg, confidence = 1.0) {
 }
 
 function getMostLikelyScore(lambdaHome, lambdaAway, maxGoals = 6) {
+  // Cap at 2.5 for display — elite teams manage games and rarely convert full xG
+  const lh = Math.min(lambdaHome, 2.5);
+  const la = Math.min(lambdaAway, 2.5);
   let best = { h: 0, a: 0, p: 0 };
   for (let h = 0; h <= maxGoals; h++) {
     for (let a = 0; a <= maxGoals; a++) {
-      const p = poissonProb(lambdaHome, h) * poissonProb(lambdaAway, a);
+      const p = poissonProb(lh, h) * poissonProb(la, a);
       if (p > best.p) best = { h, a, p };
     }
   }
@@ -173,4 +176,15 @@ function overProbabilities(lambdaHome, lambdaAway) {
   return { over15, over25, over35, btts };
 }
 
-module.exports = { predictMatch, matchProbabilities, findValue, oddsToProb, overProbabilities };
+// Dampened OVER probabilities for lopsided matches.
+// When one team has ≥75% win probability, strong teams manage the game once ahead
+// and rarely convert their full xG — so we dampen their lambda before computing OVER.
+function overProbabilitiesDampened(lambdaHome, lambdaAway, homeWinProb, awayWinProb) {
+  const DOMINANT_THRESHOLD = 0.75;
+  const DAMPEN_FACTOR = 0.75; // reduce dominant team's lambda by 25%
+  const lh = homeWinProb >= DOMINANT_THRESHOLD ? lambdaHome * DAMPEN_FACTOR : lambdaHome;
+  const la = awayWinProb >= DOMINANT_THRESHOLD ? lambdaAway * DAMPEN_FACTOR : lambdaAway;
+  return overProbabilities(lh, la);
+}
+
+module.exports = { predictMatch, matchProbabilities, findValue, oddsToProb, overProbabilities, overProbabilitiesDampened };

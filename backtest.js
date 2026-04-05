@@ -9,7 +9,7 @@
 
 const { analyzMatch } = require('./predictor');
 const { FOOTBALL_DATA_API_KEY } = require('./config');
-const { overProbabilities } = require('./poisson');
+const { overProbabilitiesDampened } = require('./poisson');
 const fetch = require('node-fetch');
 
 const FD_BASE = 'https://api.football-data.org/v4';
@@ -130,6 +130,7 @@ async function runBacktest(dateFrom, dateTo) {
   const results = [];
   let outcomeCorrect = 0, overCorrectCount = 0;
   let highConfCorrect = 0, highConfTotal = 0;
+  let slipCorrect = 0, slipTotal = 0;
   let over75Correct = 0, over75Total = 0;
 
   for (let i = 0; i < unique.length; i++) {
@@ -156,8 +157,9 @@ async function runBacktest(dateFrom, dateTo) {
     const probs = prediction.prediction.probabilities;
     const expGoals = prediction.prediction.expectedGoals;
     const { homeWin, draw, awayWin } = probs;
-    const overProbs = overProbabilities(expGoals.home, expGoals.away);
+    const overProbs = overProbabilitiesDampened(expGoals.home, expGoals.away, homeWin, awayWin);
     const over25 = overProbs.over25;
+    const drawRisk = prediction.drawRisk;
     const predicted = predictedOutcome(homeWin, draw, awayWin);
     const totalGoals = homeGoals + awayGoals;
     const outcomeOk = predicted === actual;
@@ -166,10 +168,14 @@ async function runBacktest(dateFrom, dateTo) {
     const overOk = over25Predicted === over25Actual;
     const maxProb = Math.max(homeWin, draw, awayWin);
     const isHighConf = maxProb >= 0.65;
+    // Slip pick = high conf AND (not a draw-risk home pick)
+    const isDrawRiskPick = predicted === 'HOME' && drawRisk;
+    const isSlipPick = isHighConf && !isDrawRiskPick;
 
     if (outcomeOk) outcomeCorrect++;
     if (overOk) overCorrectCount++;
     if (isHighConf) { highConfTotal++; if (outcomeOk) highConfCorrect++; }
+    if (isSlipPick) { slipTotal++; if (outcomeOk) slipCorrect++; }
     if (over25 >= 0.75) { over75Total++; if (over25Actual) over75Correct++; }
 
     results.push({
@@ -181,7 +187,7 @@ async function runBacktest(dateFrom, dateTo) {
       score: `${homeGoals}-${awayGoals}`,
       totalGoals, actual, predicted,
       homeWin, draw, awayWin, over25,
-      outcomeOk, overOk, isHighConf, maxProb,
+      outcomeOk, overOk, isHighConf, isSlipPick, drawRisk, maxProb,
       mostLikely: prediction.prediction.mostLikely,
       error: false,
     });
@@ -201,8 +207,9 @@ async function runBacktest(dateFrom, dateTo) {
       console.log(`\n❓ ${r.label} — prediction failed`);
       continue;
     }
-    const confTag = r.isHighConf ? ` [HIGH CONF ${prob(r.maxProb)}]` : '';
+    const slipTag = r.isSlipPick ? ` [SLIP PICK ${prob(r.maxProb)}]` : r.isHighConf ? ` [HIGH CONF ${prob(r.maxProb)}${r.drawRisk ? ' ⚠DRAW RISK' : ''}]` : '';
     const overTag = r.over25 >= 0.75 ? ' [OVER PICK]' : '';
+    const confTag = slipTag;
     console.log(`\n${bar(r.outcomeOk)} ${r.homeShort} vs ${r.awayShort} (${r.league} · ${r.date})`);
     console.log(`   Result:    ${r.score}  (${r.totalGoals} goals) — actual: ${r.actual}`);
     console.log(`   Predicted: ${r.predicted}${confTag}`);
@@ -227,6 +234,8 @@ async function runBacktest(dateFrom, dateTo) {
   console.log(`  Over/Under 2.5 accuracy:     ${overCorrectCount}/${total} = ${pct(overCorrectCount, total)}`);
   if (highConfTotal > 0)
     console.log(`  High-conf picks (≥65%):      ${highConfCorrect}/${highConfTotal} = ${pct(highConfCorrect, highConfTotal)}`);
+  if (slipTotal > 0)
+    console.log(`  Slip picks (≥65%, no draw risk): ${slipCorrect}/${slipTotal} = ${pct(slipCorrect, slipTotal)}  ← what goes in daily slip`);
   if (over75Total > 0)
     console.log(`  Strong OVER picks (≥75%):    ${over75Correct}/${over75Total} = ${pct(over75Correct, over75Total)} landed OVER`);
   console.log(`${'═'.repeat(64)}\n`);

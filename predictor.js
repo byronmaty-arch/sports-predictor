@@ -117,6 +117,11 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
     valueAnalysis = { homeValue, drawValue, awayValue };
   }
 
+  // Draw risk: home win is in the borderline 55–70% range AND draw is competitive (≥20%)
+  // These matches statistically end in draws more often than the model expects
+  const p = prediction.probabilities;
+  const drawRisk = p.homeWin >= 0.55 && p.homeWin < 0.70 && p.draw >= 0.20;
+
   return {
     homeTeam: homeTeamData.name,
     awayTeam: awayTeamData.name,
@@ -124,6 +129,7 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
     awayStats,
     h2h,
     prediction,
+    drawRisk,
     odds,
     valueAnalysis,
     homeInjuryFactor,

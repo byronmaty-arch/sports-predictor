@@ -5,7 +5,7 @@
 
 const { getTodaysFixtures } = require('./fetcher');
 const { analyzMatch } = require('./predictor');
-const { overProbabilities } = require('./poisson');
+const { overProbabilitiesDampened } = require('./poisson');
 
 // ─── Thresholds ───────────────────────────────────────────────────────────────
 const OUTCOME_THRESHOLD = 0.65;  // 65%+ → direct outcome pick (High Confidence)
@@ -113,7 +113,7 @@ async function generateDailySlip() {
   for (const { fixture, result } of results) {
     const p   = result.prediction.probabilities;
     const xg  = result.prediction.expectedGoals;
-    const ops = overProbabilities(xg.home, xg.away);
+    const ops = overProbabilitiesDampened(xg.home, xg.away, p.homeWin, p.awayWin);
 
     // ── Match outcome ─────────────────────────────────────────────────────────
     const outcomes = [
@@ -131,7 +131,10 @@ async function generateDailySlip() {
     ];
     const bestDC = [...dcOptions].sort((a, b) => b.prob - a.prob)[0];
 
-    if (best.prob >= OUTCOME_THRESHOLD) {
+    // Draw risk: skip home win picks in the borderline 65–70% range where a draw is competitive
+    const isDrawRiskPick = best.type === 'home' && result.drawRisk;
+
+    if (best.prob >= OUTCOME_THRESHOLD && !isDrawRiskPick) {
       highConfidence.push({ fixture, result, bet: best, overProbs: ops, reason: buildReason(result, best.type) });
     } else if (bestDC.prob >= HEDGE_THRESHOLD) {
       hedges.push({ fixture, result, bet: bestDC, overProbs: ops, reason: buildReason(result, bestDC.type) });
