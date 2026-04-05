@@ -1,8 +1,9 @@
 /**
  * Sports Predictor Telegram Bot
- * Predicts football match outcomes using Poisson distribution + live data
+ * Webhook mode — Telegram pushes updates to Railway (no polling needed)
  */
 
+const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
 const { TELEGRAM_TOKEN, TELEGRAM_CHAT_ID } = require('./config');
@@ -13,9 +14,36 @@ const { searchTeam, getRawMatches, getTodaysFixtures } = require('./fetcher');
 const { generateDailySlip } = require('./slip');
 const { sendWhatsApp, isConfigured: whatsAppConfigured } = require('./whatsapp');
 
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+// ─── Webhook setup ────────────────────────────────────────────────────────────
 
-console.log('⚽ Sports Predictor Bot started...');
+const WEBHOOK_URL = 'https://sport-predictor-production.up.railway.app';
+const PORT = process.env.PORT || 3000;
+
+// Create bot WITHOUT polling — webhook handles incoming updates
+const bot = new TelegramBot(TELEGRAM_TOKEN, { webHook: false });
+
+// Register webhook with Telegram on startup
+bot.setWebHook(`${WEBHOOK_URL}/bot${TELEGRAM_TOKEN}`)
+  .then(() => console.log(`✅ Webhook registered: ${WEBHOOK_URL}/bot${TELEGRAM_TOKEN}`))
+  .catch(err => console.error('❌ Webhook registration failed:', err.message));
+
+// ─── Express server — receives Telegram updates ───────────────────────────────
+
+const app = express();
+app.use(express.json());
+
+// Health check endpoint
+app.get('/', (req, res) => res.send('⚽ Sports Predictor Bot — Online'));
+
+// Telegram sends all updates here
+app.post(`/bot${TELEGRAM_TOKEN}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+app.listen(PORT, () => {
+  console.log(`⚽ Sports Predictor Bot started on port ${PORT} (webhook mode)`);
+});
 
 // ─── Daily slip helper ────────────────────────────────────────────────────────
 
@@ -65,7 +93,7 @@ bot.onText(/\/(start|help)/, (msg) => {
   bot.sendMessage(msg.chat.id, formatHelp(), { parse_mode: 'HTML' });
 });
 
-// ─── /debug [Team] — shows raw API matches and competition codes ──────────────
+// ─── /debug [Team] ───────────────────────────────────────────────────────────
 
 bot.onText(/\/debug (.+)/i, async (msg, match) => {
   const teamName = match[1].trim();
@@ -97,14 +125,12 @@ bot.onText(/\/slip/, async (msg) => {
 bot.onText(/\/predict (.+)/i, async (msg, match) => {
   let input = match[1].trim();
 
-  // Extract --home-out and --away-out flags (with or without quotes)
   const homeOutMatch = input.match(/--home-out\s+"([^"]+)"|--home-out\s+([\w\s,]+?)(?=\s+--|$)/i);
   const awayOutMatch = input.match(/--away-out\s+"([^"]+)"|--away-out\s+([\w\s,]+?)(?=\s+--|$)/i);
 
   const homeInjuries = homeOutMatch ? parseInjuryList(homeOutMatch[1] || homeOutMatch[2]) : [];
   const awayInjuries = awayOutMatch ? parseInjuryList(awayOutMatch[1] || awayOutMatch[2]) : [];
 
-  // Strip flags to get clean team input
   const cleanInput = input
     .replace(/--home-out\s+"[^"]+"/gi, '')
     .replace(/--away-out\s+"[^"]+"/gi, '')
@@ -117,8 +143,8 @@ bot.onText(/\/predict (.+)/i, async (msg, match) => {
   if (parts.length !== 2) {
     return bot.sendMessage(msg.chat.id,
       '❌ Format: /predict &lt;Home&gt; vs &lt;Away&gt;\n' +
-      'With injuries: /predict Arsenal vs Chelsea --home-out "Saka" --away-out "Palmer, Jackson"\n\n' +
-      'Example: <code>/predict Liverpool vs Man City --home-out "Salah" --away-out "Haaland"</code>',
+      'Example: <code>/predict Liverpool vs Man City</code>\n' +
+      'With injuries: <code>/predict Arsenal vs Chelsea --home-out "Saka" --away-out "Palmer"</code>',
       { parse_mode: 'HTML' }
     );
   }
@@ -151,13 +177,11 @@ bot.onText(/\/predict (.+)/i, async (msg, match) => {
   }
 });
 
-// ─── /quick [home_scored] [home_conceded] [away_scored] [away_conceded] ───────
-// For when you know the stats but don't have an API key set up yet
+// ─── /quick ──────────────────────────────────────────────────────────────────
 
 bot.onText(/\/quick (.+)/, (msg, match) => {
   const parts = match[1].trim().split(/\s+/);
 
-  // Mode 1: 4 numbers (stats only)
   if (parts.length === 4) {
     const [hs, hc, as_, ac] = parts.map(Number);
     if ([hs, hc, as_, ac].some(isNaN)) {
@@ -171,7 +195,6 @@ bot.onText(/\/quick (.+)/, (msg, match) => {
     return;
   }
 
-  // Mode 2: "TeamA vs TeamB" + 4 numbers
   const vsMatch = match[1].match(/^(.+?)\s+vs\s+(.+?)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)$/i);
   if (vsMatch) {
     const homeTeam = vsMatch[1].trim();
@@ -183,9 +206,7 @@ bot.onText(/\/quick (.+)/, (msg, match) => {
   }
 
   bot.sendMessage(msg.chat.id,
-    '❌ Usage:\n' +
-    '/quick 1.8 1.1 1.3 1.4\n' +
-    '/quick Arsenal vs Chelsea 1.8 1.1 1.3 1.4'
+    '❌ Usage:\n/quick 1.8 1.1 1.3 1.4\n/quick Arsenal vs Chelsea 1.8 1.1 1.3 1.4'
   );
 });
 
@@ -222,8 +243,6 @@ bot.on('message', async (msg) => {
 });
 
 // ─── Daily slip — auto-send at 08:00 EAT (05:00 UTC) every day ───────────────
-// Cron format: minute hour day month weekday
-// '0 5 * * *' = every day at 05:00 UTC = 08:00 Uganda time (EAT = UTC+3)
 
 cron.schedule('0 5 * * *', async () => {
   console.log('[cron] Sending daily slip to Telegram + WhatsApp...');
@@ -236,14 +255,9 @@ cron.schedule('0 5 * * *', async () => {
 
 console.log('📅 Daily slip scheduled for 08:00 EAT (05:00 UTC) every day.');
 
-// ─── Error handling ───────────────────────────────────────────────────────────
-
-bot.on('polling_error', (err) => {
-  console.error('Polling error:', err.message);
-});
+// ─── Graceful shutdown ────────────────────────────────────────────────────────
 
 process.on('SIGINT', () => {
   console.log('Shutting down bot...');
-  bot.stopPolling();
   process.exit(0);
 });
