@@ -7,10 +7,11 @@ const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
 const { TELEGRAM_TOKEN, TELEGRAM_CHAT_ID } = require('./config');
 const { analyzMatch, quickPredict } = require('./predictor');
-const { formatPrediction, formatHelp, formatQuickPredict, formatSlip } = require('./formatter');
+const { formatPrediction, formatHelp, formatQuickPredict, formatSlip, formatSlipWhatsApp } = require('./formatter');
 const { parseInjuryList } = require('./injuries');
 const { searchTeam, getRawMatches } = require('./fetcher');
 const { generateDailySlip } = require('./slip');
+const { sendWhatsApp, isConfigured: whatsAppConfigured } = require('./whatsapp');
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
@@ -18,7 +19,7 @@ console.log('⚽ Sports Predictor Bot started...');
 
 // ─── Daily slip helper ────────────────────────────────────────────────────────
 
-async function sendDailySlip(chatId) {
+async function sendDailySlip(chatId, { notifyWhatsApp = false } = {}) {
   const statusMsg = await bot.sendMessage(chatId,
     `⏳ <b>Generating today's betting slip...</b>\nFetching fixtures and analysing each match.\nThis takes ~3 minutes due to API rate limits. I'll update this message when done.`,
     { parse_mode: 'HTML' }
@@ -26,12 +27,21 @@ async function sendDailySlip(chatId) {
 
   try {
     const slip = await generateDailySlip();
+
+    // Send to Telegram
     const text = formatSlip(slip);
     await bot.editMessageText(text, {
       chat_id: chatId,
       message_id: statusMsg.message_id,
       parse_mode: 'HTML',
     });
+
+    // Send to WhatsApp if enabled and this is an auto/scheduled slip
+    if (notifyWhatsApp && whatsAppConfigured()) {
+      const waText = formatSlipWhatsApp(slip);
+      await sendWhatsApp(waText);
+      console.log('[slip] WhatsApp copy sent.');
+    }
   } catch (err) {
     console.error('[slip] Fatal error:', err);
     bot.editMessageText('❌ Failed to generate slip. Check logs.', {
@@ -208,9 +218,9 @@ bot.on('message', async (msg) => {
 // '0 5 * * *' = every day at 05:00 UTC = 08:00 Uganda time (EAT = UTC+3)
 
 cron.schedule('0 5 * * *', async () => {
-  console.log('[cron] Sending daily slip...');
+  console.log('[cron] Sending daily slip to Telegram + WhatsApp...');
   if (TELEGRAM_CHAT_ID) {
-    await sendDailySlip(TELEGRAM_CHAT_ID);
+    await sendDailySlip(TELEGRAM_CHAT_ID, { notifyWhatsApp: true });
   } else {
     console.warn('[cron] TELEGRAM_CHAT_ID not set — skipping auto slip.');
   }

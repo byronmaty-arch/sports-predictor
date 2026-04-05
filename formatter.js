@@ -282,10 +282,86 @@ function formatSlip(slip) {
   return lines.join('\n');
 }
 
+// Plain-text slip for WhatsApp (no HTML — uses *bold* WhatsApp markdown)
+function formatSlipWhatsApp(slip) {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'short', year: 'numeric',
+    timeZone: 'Africa/Kampala',
+  });
+
+  const lines = [];
+  lines.push(`📋 *DAILY BETTING SLIP*`);
+  lines.push(`📅 ${dateStr}`);
+  lines.push(`━━━━━━━━━━━━━━━━━━━━`);
+
+  if (slip.noFixtures) {
+    lines.push(`\n⚠️ No fixtures found today in covered leagues.`);
+    return lines.join('\n');
+  }
+
+  lines.push(`⚽ Analysed *${slip.analyzedCount}* fixture(s)`);
+
+  if (!slip.highConfidence.length && !slip.hedges.length && !slip.overs.length) {
+    lines.push(`\n⚠️ No picks meet confidence thresholds today.`);
+    return lines.join('\n');
+  }
+
+  let n = 1;
+
+  if (slip.highConfidence.length) {
+    lines.push(`\n🟢 *HIGH CONFIDENCE (≥65%)*`);
+    for (const pick of slip.highConfidence) {
+      const ko = kickoffEAT(pick.fixture.kickoff);
+      lines.push(``);
+      lines.push(`*${n}. ${pick.result.homeTeam} vs ${pick.result.awayTeam}*`);
+      lines.push(`   ✅ ${pick.bet.label} — ${pct(pick.bet.prob)}`);
+      lines.push(`   🏟 ${pick.fixture.competition} · ⏰ ${ko} EAT`);
+      lines.push(`   💡 ${pick.reason}`);
+      lines.push(`   📊 xG ${pick.result.prediction.expectedGoals.home.toFixed(1)}–${pick.result.prediction.expectedGoals.away.toFixed(1)} · Score: ${pick.result.prediction.mostLikely}`);
+      n++;
+    }
+  }
+
+  if (slip.hedges.length) {
+    lines.push(`\n🛡️ *HEDGE — Double Chance (≥80%)*`);
+    for (const pick of slip.hedges) {
+      const ko = kickoffEAT(pick.fixture.kickoff);
+      lines.push(``);
+      lines.push(`*${n}. ${pick.result.homeTeam} vs ${pick.result.awayTeam}*`);
+      lines.push(`   🛡️ ${pick.bet.label} — ${pct(pick.bet.prob)}`);
+      lines.push(`   🏟 ${pick.fixture.competition} · ⏰ ${ko} EAT`);
+      lines.push(`   💡 ${pick.reason}`);
+      n++;
+    }
+  }
+
+  if (slip.overs.length) {
+    lines.push(`\n⚽ *GOALS — Over/Under (≥75%)*`);
+    for (const pick of slip.overs) {
+      const ko = kickoffEAT(pick.fixture.kickoff);
+      lines.push(``);
+      lines.push(`*${n}. ${pick.result.homeTeam} vs ${pick.result.awayTeam}*`);
+      lines.push(`   ⚽ ${pick.bet.line} — ${pct(pick.bet.prob)}`);
+      lines.push(`   🏟 ${pick.fixture.competition} · ⏰ ${ko} EAT`);
+      lines.push(`   💡 ${pick.reason}`);
+      lines.push(`   📊 O1.5: ${pct(pick.overProbs.over15)}  O2.5: ${pct(pick.overProbs.over25)}  O3.5: ${pct(pick.overProbs.over35)}`);
+      n++;
+    }
+  }
+
+  lines.push(``);
+  lines.push(`━━━━━━━━━━━━━━━━━━━━`);
+  lines.push(`📌 *${n - 1} pick(s) today*`);
+  lines.push(`⚠️ _Model predictions only. Bet responsibly._`);
+
+  return lines.join('\n');
+}
+
 function kickoffEAT(utcDate) {
   return new Date(utcDate).toLocaleTimeString('en-GB', {
     hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Kampala',
   });
 }
 
-module.exports = { formatPrediction, formatHelp, formatQuickPredict, formatSlip };
+module.exports = { formatPrediction, formatHelp, formatQuickPredict, formatSlip, formatSlipWhatsApp };

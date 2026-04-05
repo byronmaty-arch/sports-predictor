@@ -7,4 +7,11 @@ module.exports = {
 
   // Get free key at: https://the-odds-api.com/#get-access
   ODDS_API_KEY: process.env.ODDS_API_KEY || '31160cd5ee324a5d53ade8cfa82e5ddb',
+
+  // Twilio WhatsApp — set these in Railway environment variables
+  // Get from: console.twilio.com → Account Info
+  TWILIO_ACCOUNT_SID:    process.env.TWILIO_ACCOUNT_SID    || '',
+  TWILIO_AUTH_TOKEN:     process.env.TWILIO_AUTH_TOKEN      || '',
+  TWILIO_WHATSAPP_FROM:  process.env.TWILIO_WHATSAPP_FROM   || 'whatsapp:+14155238886', // Twilio sandbox default
+  TWILIO_WHATSAPP_TO:    process.env.TWILIO_WHATSAPP_TO     || '', // Your WhatsApp e.g. whatsapp:+256XXXXXXXXX
 };
