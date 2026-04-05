@@ -20,7 +20,7 @@ const WEBHOOK_URL = 'https://sport-predictor-production.up.railway.app';
 const PORT = process.env.PORT || 3000;
 
 // Create bot WITHOUT polling — webhook handles incoming updates
-const bot = new TelegramBot(TELEGRAM_TOKEN, { webHook: false });
+const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: false });
 
 // Register webhook with Telegram on startup
 bot.setWebHook(`${WEBHOOK_URL}/bot${TELEGRAM_TOKEN}`)
