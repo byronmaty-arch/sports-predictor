@@ -507,6 +507,8 @@ function computeTeamStats(matches, teamId, xgData = null) {
 
   let wins = 0, draws = 0, losses = 0;
   const form = [];
+  const homeFormArr = [];
+  const awayFormArr = [];
 
   sorted.forEach((m, i) => {
     const isHome = m.homeTeam.id === teamId;
@@ -544,9 +546,13 @@ function computeTeamStats(matches, teamId, xgData = null) {
       }
     }
 
-    if (scored > conceded)       { wins++;  form.push('W'); }
-    else if (scored === conceded) { draws++; form.push('D'); }
-    else                          { losses++; form.push('L'); }
+    const result = scored > conceded ? 'W' : scored === conceded ? 'D' : 'L';
+    if (result === 'W') wins++;
+    else if (result === 'D') draws++;
+    else losses++;
+    form.push(result);
+    if (isHome) homeFormArr.push(result);
+    else awayFormArr.push(result);
   });
 
   if (totalWeight === 0) return null;
@@ -576,6 +582,8 @@ function computeTeamStats(matches, teamId, xgData = null) {
     awayAvgScored, awayAvgConceded,   // Used when this team plays away
     usingXG: hasXG,
     form: form.slice(0, 5).join(''),
+    homeForm: homeFormArr.slice(0, 5).join(''),  // Last 5 home games
+    awayForm: awayFormArr.slice(0, 5).join(''),  // Last 5 away games
     points: wins * 3 + draws,
     confidence: Math.min(played / 10, 1.0),
   };

@@ -8,9 +8,10 @@ const { analyzMatch } = require('./predictor');
 const { overProbabilitiesDampened } = require('./poisson');
 
 // ─── Thresholds ───────────────────────────────────────────────────────────────
-const OUTCOME_THRESHOLD = 0.65;  // 65%+ → direct outcome pick (High Confidence)
-const HEDGE_THRESHOLD   = 0.80;  // 80%+ → double chance hedge
-const OVER_THRESHOLD    = 0.75;  // 75%+ → OVER goals recommendation
+const OUTCOME_THRESHOLD    = 0.65;  // 65%+ → eligible for picks
+const BORDERLINE_THRESHOLD = 0.70;  // 65-70% → double chance (not outright); ≥70% → outright high-conf
+const HEDGE_THRESHOLD      = 0.80;  // 80%+ DC → hedge even without outright pick
+const OVER_THRESHOLD       = 0.75;  // 75%+ → OVER goals recommendation
 
 // Rate limiting: football-data.org free tier = 10 calls/min
 // Each match uses ~3 API calls → safe to process one match every 22 seconds
@@ -131,11 +132,18 @@ async function generateDailySlip() {
     ];
     const bestDC = [...dcOptions].sort((a, b) => b.prob - a.prob)[0];
 
-    // Draw risk: skip home win picks in the borderline 65–70% range where a draw is competitive
+    // Draw risk: skip home win picks flagged as draw risk (borderline or giant-killer Elo gap)
     const isDrawRiskPick = best.type === 'home' && result.drawRisk;
 
-    if (best.prob >= OUTCOME_THRESHOLD && !isDrawRiskPick) {
+    if (best.prob >= BORDERLINE_THRESHOLD && !isDrawRiskPick && !result.lowDataWarning) {
+      // ≥70% and no draw risk and enough data → outright high-confidence pick
       highConfidence.push({ fixture, result, bet: best, overProbs: ops, reason: buildReason(result, best.type) });
+    } else if (best.prob >= OUTCOME_THRESHOLD && !isDrawRiskPick && !result.lowDataWarning) {
+      // 65–69%: borderline confidence → route to double chance for safety
+      const dcBet = best.type === 'away'
+        ? dcOptions.find(d => d.type === 'dc_away')
+        : dcOptions.find(d => d.type === 'dc_home');
+      hedges.push({ fixture, result, bet: dcBet || bestDC, overProbs: ops, reason: buildReason(result, (dcBet || bestDC).type) });
     } else if (bestDC.prob >= HEDGE_THRESHOLD) {
       hedges.push({ fixture, result, bet: bestDC, overProbs: ops, reason: buildReason(result, bestDC.type) });
     }

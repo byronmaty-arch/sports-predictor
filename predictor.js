@@ -8,6 +8,17 @@ const { predictMatch, findValue } = require('./poisson');
 const { computeInjuryFactor } = require('./injuries');
 const { calculateElo, eloStrengthMultiplier, eloLabel } = require('./elo');
 
+// Form momentum multiplier based on venue-specific recent form (W/D/L string)
+// Uses last 5 home games (for home team) or last 5 away games (for away team)
+// Max ±6% adjustment — complements xG/goals averages with results momentum
+function formMomentum(formStr) {
+  if (!formStr || formStr.length < 3) return 1.0;
+  const wins   = (formStr.match(/W/g) || []).length;
+  const losses = (formStr.match(/L/g) || []).length;
+  const score  = (wins - losses) / formStr.length; // -1 (all losses) to +1 (all wins)
+  return 1 + 0.06 * score;
+}
+
 // League-specific average goals per team per match (measured 2025-26 season)
 // Using per-league values prevents Bundesliga teams (1.60/game) from being
 // inflated vs the old single 1.35 average that was calibrated for PL/La Liga
@@ -69,16 +80,21 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
   const awayInjuryFactor = computeInjuryFactor(awayInjuries);
 
   // 6. Compose all multipliers into final attack/defence strengths
-  //    Order: base xG → Elo adjustment → rest factor → injury factor
+  //    Order: base xG → Elo adjustment → rest factor → form momentum → injury factor
   // Cap raw avg values before dividing by league avg to prevent extreme lambdas
   // when a team has an outlier run (e.g. leaking 3+ goals/game away in small sample)
   // Cap at leagueAvg × 1.5 — prevents extreme outlier runs from compounding
   const MAX_AVG_GOALS = LEAGUE_AVG_GOALS * 1.5;
   const capAvg = v => Math.min(v, MAX_AVG_GOALS);
 
+  // Venue-specific form momentum (±6% based on last 5 home/away games)
+  const homeFormMult = formMomentum(homeStats.homeForm);
+  const awayFormMult = formMomentum(awayStats.awayForm);
+
   const homeAttack  = (capAvg(homeStats.homeAvgScored)  / LEAGUE_AVG_GOALS)
     * homeEloMult
     * homeRestFactor
+    * homeFormMult
     * (homeInjuryFactor?.attackMultiplier  ?? 1);
 
   const homeDefence = (capAvg(homeStats.homeAvgConceded) / LEAGUE_AVG_GOALS)
@@ -89,6 +105,7 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
   const awayAttack  = (capAvg(awayStats.awayAvgScored)  / LEAGUE_AVG_GOALS)
     * awayEloMult
     * awayRestFactor
+    * awayFormMult
     * (awayInjuryFactor?.attackMultiplier  ?? 1);
 
   const awayDefence = (capAvg(awayStats.awayAvgConceded) / LEAGUE_AVG_GOALS)
@@ -136,10 +153,18 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
     valueAnalysis = { homeValue, drawValue, awayValue };
   }
 
-  // Draw risk: home win is in the borderline 55–70% range AND draw is competitive (≥20%)
-  // These matches statistically end in draws more often than the model expects
+  // Draw risk: two patterns identified from backtest analysis
+  // 1. Borderline home favourite (55–70%) with competitive draw chance — draws more often than model expects
+  // 2. Giant-killer setup: Elo gap ≥400pts home advantage, away team likely sets up defensively
+  //    (e.g. Real Madrid vs Girona: Elo gap 428, model 73.5% HOME → actual 1-1 DRAW)
   const p = prediction.probabilities;
-  const drawRisk = p.homeWin >= 0.55 && p.homeWin < 0.70 && p.draw >= 0.20;
+  const eloGap = homeElo - awayElo;
+  const isGiantKillerSetup = eloGap >= 400 && p.homeWin >= 0.65 && p.awayWin < 0.20;
+  const drawRisk = (p.homeWin >= 0.55 && p.homeWin < 0.70 && p.draw >= 0.20) || isGiantKillerSetup;
+
+  // Low data warning: either team has <8 league matches in our dataset
+  // Newly promoted teams or teams with sparse data — model confidence is unreliable
+  const lowDataWarning = homeStats.played < 8 || awayStats.played < 8;
 
   return {
     homeTeam: homeTeamData.name,
@@ -149,6 +174,7 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
     h2h,
     prediction,
     drawRisk,
+    lowDataWarning,
     odds,
     valueAnalysis,
     homeInjuryFactor,
