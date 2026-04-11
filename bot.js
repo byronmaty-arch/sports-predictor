@@ -8,7 +8,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
 const { TELEGRAM_TOKEN, TELEGRAM_CHAT_ID } = require('./config');
 const { analyzMatch, quickPredict } = require('./predictor');
-const { formatPrediction, formatHelp, formatQuickPredict, formatSlip, formatSlipWhatsApp } = require('./formatter');
+const { formatPrediction, formatHelp, formatQuickPredict, formatSlip, formatSlipSections, formatSlipWhatsApp } = require('./formatter');
 const { parseInjuryList } = require('./injuries');
 const { searchTeam, getRawMatches, getTodaysFixtures } = require('./fetcher');
 const { generateDailySlip } = require('./slip');
@@ -68,19 +68,23 @@ async function sendDailySlip(chatId, { notifyWhatsApp = false } = {}) {
     );
 
     const slip = await generateDailySlip();
-    const text = formatSlip(slip);
+    const sections = formatSlipSections(slip);
 
-    // Try to edit the loading message; if it fails (Telegram timeout after 7+ min),
-    // send a fresh message instead
+    // Send slip as multiple messages (one per section) to stay under Telegram's 4096 char limit.
+    // Edit the loading message with section[0], then send remaining sections fresh.
     try {
-      await bot.editMessageText(text, {
+      await bot.editMessageText(sections[0], {
         chat_id: chatId,
         message_id: statusMsg.message_id,
         parse_mode: 'HTML',
       });
     } catch (editErr) {
       console.warn('[slip] editMessageText failed, sending new message:', editErr.message);
-      await bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
+      await bot.sendMessage(chatId, sections[0], { parse_mode: 'HTML' });
+    }
+
+    for (let i = 1; i < sections.length; i++) {
+      await bot.sendMessage(chatId, sections[i], { parse_mode: 'HTML' });
     }
 
     if (notifyWhatsApp && whatsAppConfigured()) {

@@ -364,4 +364,94 @@ function kickoffEAT(utcDate) {
   });
 }
 
-module.exports = { formatPrediction, formatHelp, formatQuickPredict, formatSlip, formatSlipWhatsApp };
+// Splits the slip into 3 separate messages to stay under Telegram's 4096 char limit:
+//   [0] Header + High Confidence picks
+//   [1] Hedge / Double Chance picks  (omitted if empty)
+//   [2] Goals / Over picks + footer  (omitted if empty)
+function formatSlipSections(slip) {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'short', year: 'numeric',
+    timeZone: 'Africa/Kampala',
+  });
+
+  const headerLines = [
+    `📋 <b>DAILY BETTING SLIP</b>`,
+    `📅 ${dateStr}`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `⚽ Analysed <b>${slip.analyzedCount}</b> fixture(s)`,
+  ];
+
+  if (slip.noFixtures) {
+    return [headerLines.join('\n') + '\n\n⚠️ No fixtures found today in covered leagues.\nUse /predict [Home] vs [Away] for manual predictions.'];
+  }
+  if (!slip.highConfidence.length && !slip.hedges.length && !slip.overs.length) {
+    return [headerLines.join('\n') + '\n\n⚠️ No picks meet confidence thresholds today.\nAll matches are too close to call — skip today or use /predict for details.'];
+  }
+
+  const sections = [];
+  let n = 1;
+
+  // ── Section 1: Header + High Confidence ──────────────────────────────────────
+  const s1 = [...headerLines];
+  if (slip.highConfidence.length) {
+    s1.push(`\n🟢 <b>HIGH CONFIDENCE (≥70%)</b>`);
+    for (const pick of slip.highConfidence) {
+      const ko = kickoffEAT(pick.fixture.kickoff);
+      s1.push(``);
+      s1.push(`<b>${n}. ${pick.result.homeTeam} vs ${pick.result.awayTeam}</b>`);
+      s1.push(`   ✅ <b>${pick.bet.label}</b>  —  ${pct(pick.bet.prob)}`);
+      s1.push(`   🏟 ${pick.fixture.competition}  ·  ⏰ ${ko} EAT`);
+      s1.push(`   💡 ${pick.reason}`);
+      s1.push(`   📊 xG ${pick.result.prediction.expectedGoals.home.toFixed(1)}–${pick.result.prediction.expectedGoals.away.toFixed(1)}  ·  Likely: ${pick.result.prediction.mostLikely}`);
+      n++;
+    }
+  } else {
+    s1.push(`\n⚠️ No high-confidence outright picks today.`);
+  }
+  sections.push(s1.join('\n'));
+
+  // ── Section 2: Hedges ─────────────────────────────────────────────────────────
+  if (slip.hedges.length) {
+    const s2 = [`🛡️ <b>HEDGE — Double Chance</b>`];
+    for (const pick of slip.hedges) {
+      const ko = kickoffEAT(pick.fixture.kickoff);
+      s2.push(``);
+      s2.push(`<b>${n}. ${pick.result.homeTeam} vs ${pick.result.awayTeam}</b>`);
+      s2.push(`   🛡️ <b>${pick.bet.label}</b>  —  ${pct(pick.bet.prob)}`);
+      s2.push(`   🏟 ${pick.fixture.competition}  ·  ⏰ ${ko} EAT`);
+      s2.push(`   💡 ${pick.reason}`);
+      s2.push(`   📊 xG ${pick.result.prediction.expectedGoals.home.toFixed(1)}–${pick.result.prediction.expectedGoals.away.toFixed(1)}`);
+      n++;
+    }
+    sections.push(s2.join('\n'));
+  }
+
+  // ── Section 3: Overs + footer ─────────────────────────────────────────────────
+  if (slip.overs.length) {
+    const s3 = [`⚽ <b>GOALS — Over/Under (≥75%)</b>`];
+    for (const pick of slip.overs) {
+      const ko = kickoffEAT(pick.fixture.kickoff);
+      s3.push(``);
+      s3.push(`<b>${n}. ${pick.result.homeTeam} vs ${pick.result.awayTeam}</b>`);
+      s3.push(`   ⚽ <b>${pick.bet.line}</b>  —  ${pct(pick.bet.prob)}`);
+      s3.push(`   🏟 ${pick.fixture.competition}  ·  ⏰ ${ko} EAT`);
+      s3.push(`   💡 ${pick.reason}`);
+      s3.push(`   📊 O1.5: ${pct(pick.overProbs.over15)}  O2.5: ${pct(pick.overProbs.over25)}  O3.5: ${pct(pick.overProbs.over35)}  BTTS: ${pct(pick.overProbs.btts)}`);
+      n++;
+    }
+    s3.push(``);
+    s3.push(`━━━━━━━━━━━━━━━━━━━━`);
+    s3.push(`📌 <b>${n - 1} pick(s) today</b>`);
+    s3.push(`⚠️ <i>Model predictions only. Bet responsibly.</i>`);
+    sections.push(s3.join('\n'));
+  } else {
+    // No overs section — append footer to last section
+    sections[sections.length - 1] +=
+      `\n\n━━━━━━━━━━━━━━━━━━━━\n📌 <b>${n - 1} pick(s) today</b>\n⚠️ <i>Model predictions only. Bet responsibly.</i>`;
+  }
+
+  return sections;
+}
+
+module.exports = { formatPrediction, formatHelp, formatQuickPredict, formatSlip, formatSlipSections, formatSlipWhatsApp };
