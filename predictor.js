@@ -8,8 +8,17 @@ const { predictMatch, findValue } = require('./poisson');
 const { computeInjuryFactor } = require('./injuries');
 const { calculateElo, eloStrengthMultiplier, eloLabel } = require('./elo');
 
-// Average goals per match across top European leagues (used as baseline)
-const LEAGUE_AVG_GOALS = 1.35; // per team per match (roughly 2.7 total)
+// League-specific average goals per team per match (measured 2025-26 season)
+// Using per-league values prevents Bundesliga teams (1.60/game) from being
+// inflated vs the old single 1.35 average that was calibrated for PL/La Liga
+const LEAGUE_AVG_GOALS_MAP = {
+  'PL':  1.37,  // Premier League
+  'BL1': 1.60,  // Bundesliga
+  'SA':  1.22,  // Serie A
+  'PD':  1.34,  // La Liga
+  'FL1': 1.40,  // Ligue 1
+};
+const LEAGUE_AVG_GOALS_DEFAULT = 1.35; // fallback for other leagues
 
 async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
   const { homeInjuries = [], awayInjuries = [] } = options;
@@ -31,6 +40,10 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
     getTeamXG(awayTeamData.name),
     getH2H(homeTeamData.id, awayTeamData.id),
   ]);
+
+  // Detect league from recent matches for calibrated league average
+  const leagueCode = homeMatches[0]?.competition?.code || 'PL';
+  const LEAGUE_AVG_GOALS = LEAGUE_AVG_GOALS_MAP[leagueCode] || LEAGUE_AVG_GOALS_DEFAULT;
 
   const homeStats = computeTeamStats(homeMatches, homeTeamData.id, homeXG);
   const awayStats = computeTeamStats(awayMatches, awayTeamData.id, awayXG);
@@ -57,22 +70,28 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
 
   // 6. Compose all multipliers into final attack/defence strengths
   //    Order: base xG → Elo adjustment → rest factor → injury factor
-  const homeAttack  = (homeStats.homeAvgScored  / LEAGUE_AVG_GOALS)
+  // Cap raw avg values before dividing by league avg to prevent extreme lambdas
+  // when a team has an outlier run (e.g. leaking 3+ goals/game away in small sample)
+  // Cap at leagueAvg × 1.5 — prevents extreme outlier runs from compounding
+  const MAX_AVG_GOALS = LEAGUE_AVG_GOALS * 1.5;
+  const capAvg = v => Math.min(v, MAX_AVG_GOALS);
+
+  const homeAttack  = (capAvg(homeStats.homeAvgScored)  / LEAGUE_AVG_GOALS)
     * homeEloMult
     * homeRestFactor
     * (homeInjuryFactor?.attackMultiplier  ?? 1);
 
-  const homeDefence = (homeStats.homeAvgConceded / LEAGUE_AVG_GOALS)
-    * (1 / homeEloMult)          // Stronger teams concede less
+  const homeDefence = (capAvg(homeStats.homeAvgConceded) / LEAGUE_AVG_GOALS)
+    * (1 / homeEloMult)
     * homeRestFactor
     * (homeInjuryFactor?.defenceMultiplier ?? 1);
 
-  const awayAttack  = (awayStats.awayAvgScored  / LEAGUE_AVG_GOALS)
+  const awayAttack  = (capAvg(awayStats.awayAvgScored)  / LEAGUE_AVG_GOALS)
     * awayEloMult
     * awayRestFactor
     * (awayInjuryFactor?.attackMultiplier  ?? 1);
 
-  const awayDefence = (awayStats.awayAvgConceded / LEAGUE_AVG_GOALS)
+  const awayDefence = (capAvg(awayStats.awayAvgConceded) / LEAGUE_AVG_GOALS)
     * (1 / awayEloMult)
     * awayRestFactor
     * (awayInjuryFactor?.defenceMultiplier ?? 1);

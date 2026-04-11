@@ -70,11 +70,18 @@ async function sendDailySlip(chatId, { notifyWhatsApp = false } = {}) {
     const slip = await generateDailySlip();
     const text = formatSlip(slip);
 
-    await bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: statusMsg.message_id,
-      parse_mode: 'HTML',
-    });
+    // Try to edit the loading message; if it fails (Telegram timeout after 7+ min),
+    // send a fresh message instead
+    try {
+      await bot.editMessageText(text, {
+        chat_id: chatId,
+        message_id: statusMsg.message_id,
+        parse_mode: 'HTML',
+      });
+    } catch (editErr) {
+      console.warn('[slip] editMessageText failed, sending new message:', editErr.message);
+      await bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
+    }
 
     if (notifyWhatsApp && whatsAppConfigured()) {
       const waText = formatSlipWhatsApp(slip);
