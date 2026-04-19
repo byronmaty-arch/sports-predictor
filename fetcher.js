@@ -357,21 +357,23 @@ const UNDERSTAT_TEAM_MAP = {
   'southampton fc': 'Southampton', 'southampton': 'Southampton',
   // Bundesliga
   'fc bayern münchen': 'Bayern_Munich', 'bayern munich': 'Bayern_Munich', 'bayern': 'Bayern_Munich',
-  'borussia dortmund': 'Dortmund', 'dortmund': 'Dortmund',
-  'rb leipzig': 'RB_Leipzig', 'leipzig': 'RB_Leipzig',
+  'borussia dortmund': 'Borussia_Dortmund', 'dortmund': 'Borussia_Dortmund',
+  'rb leipzig': 'RasenBallsport_Leipzig', 'leipzig': 'RasenBallsport_Leipzig',
   'bayer 04 leverkusen': 'Bayer_Leverkusen', 'bayer leverkusen': 'Bayer_Leverkusen', 'leverkusen': 'Bayer_Leverkusen',
   'eintracht frankfurt': 'Eintracht_Frankfurt', 'frankfurt': 'Eintracht_Frankfurt',
   'tsg 1899 hoffenheim': 'Hoffenheim', 'hoffenheim': 'Hoffenheim',
-  'hamburger sv': 'Hamburg', 'hsv': 'Hamburg',
-  'vfb stuttgart': 'Stuttgart', 'stuttgart': 'Stuttgart',
+  'hamburger sv': 'Hamburger_SV', 'hsv': 'Hamburger_SV', 'hamburg': 'Hamburger_SV',
+  'vfb stuttgart': 'VfB_Stuttgart', 'stuttgart': 'VfB_Stuttgart',
   'vfl wolfsburg': 'Wolfsburg', 'wolfsburg': 'Wolfsburg',
   'sv werder bremen': 'Werder_Bremen', 'werder bremen': 'Werder_Bremen', 'bremen': 'Werder_Bremen',
-  '1. fsv mainz 05': 'Mainz', 'mainz': 'Mainz', 'mainz 05': 'Mainz',
+  '1. fsv mainz 05': 'Mainz_05', 'mainz': 'Mainz_05', 'mainz 05': 'Mainz_05',
   'fc augsburg': 'Augsburg', 'augsburg': 'Augsburg',
   'sc freiburg': 'Freiburg', 'freiburg': 'Freiburg',
-  'borussia mönchengladbach': 'Borussia_M_Gladbach', 'gladbach': 'Borussia_M_Gladbach', 'monchengladbach': 'Borussia_M_Gladbach',
+  'borussia mönchengladbach': 'Borussia_M.Gladbach', 'gladbach': 'Borussia_M.Gladbach', 'monchengladbach': 'Borussia_M.Gladbach', 'mönchengladbach': 'Borussia_M.Gladbach',
   '1. fc union berlin': 'Union_Berlin', 'union berlin': 'Union_Berlin',
-  '1. fc köln': 'FC_Koln', 'koln': 'FC_Koln', 'köln': 'FC_Koln',
+  '1. fc köln': 'FC_Cologne', 'koln': 'FC_Cologne', 'köln': 'FC_Cologne', 'cologne': 'FC_Cologne',
+  '1. fc heidenheim 1846': 'FC_Heidenheim', 'heidenheim': 'FC_Heidenheim',
+  'fc st. pauli': 'St._Pauli', 'st. pauli': 'St._Pauli', 'st pauli': 'St._Pauli',
   // La Liga
   'real madrid cf': 'Real_Madrid', 'real madrid': 'Real_Madrid',
   'fc barcelona': 'Barcelona', 'barcelona': 'Barcelona',
@@ -393,7 +395,7 @@ const UNDERSTAT_TEAM_MAP = {
   'rc celta de vigo': 'Celta_Vigo', 'celta vigo': 'Celta_Vigo', 'celta': 'Celta_Vigo',
   // Serie A
   'juventus fc': 'Juventus', 'juventus': 'Juventus',
-  'fc internazionale milano': 'Internazionale', 'inter milan': 'Internazionale', 'inter': 'Internazionale', 'internazionale': 'Internazionale',
+  'fc internazionale milano': 'Inter', 'inter milan': 'Inter', 'inter': 'Inter', 'internazionale': 'Inter',
   'ac milan': 'AC_Milan', 'milan': 'AC_Milan',
   'ssc napoli': 'Napoli', 'napoli': 'Napoli',
   'as roma': 'Roma', 'roma': 'Roma',
@@ -405,7 +407,7 @@ const UNDERSTAT_TEAM_MAP = {
   'genoa cfc': 'Genoa', 'genoa': 'Genoa',
   'parma calcio 1913': 'Parma', 'parma': 'Parma',
   'udinese calcio': 'Udinese', 'udinese': 'Udinese',
-  'hellas verona fc': 'Hellas_Verona', 'hellas verona': 'Hellas_Verona', 'verona': 'Hellas_Verona',
+  'hellas verona fc': 'Verona', 'hellas verona': 'Verona', 'verona': 'Verona',
   'torino fc': 'Torino', 'torino': 'Torino',
   'us lecce': 'Lecce', 'lecce': 'Lecce',
   // Ligue 1
@@ -435,6 +437,8 @@ function currentSeason() {
 
 // Fetch xG data from Understat for a team
 // Returns array of { date, xgFor, xgAgainst } or null on failure
+// Uses the JSON AJAX endpoint (the old team-page scraper broke when Understat
+// stopped embedding matchesData inline around Nov 2025).
 async function getTeamXG(teamName) {
   const key = teamName.toLowerCase().trim();
   const understatName = UNDERSTAT_TEAM_MAP[key];
@@ -443,28 +447,19 @@ async function getTeamXG(teamName) {
   const season = currentSeason();
 
   try {
-    const url = `https://understat.com/team/${understatName}/${season}`;
+    const url = `https://understat.com/getTeamData/${understatName}/${season}`;
     const res = await fetch(url, {
       headers: {
+        'X-Requested-With': 'XMLHttpRequest',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
       },
     });
     if (!res.ok) return null;
 
-    const html = await res.text();
-
-    // Understat embeds data as: var matchesData = JSON.parse('...')
-    const raw = html.match(/var matchesData\s*=\s*JSON\.parse\('(.+?)'\)/s);
-    if (!raw) return null;
-
-    // Decode \xNN hex escapes and unescape quotes
-    const jsonStr = raw[1]
-      .replace(/\\x([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
-      .replace(/\\\\/g, '\\')
-      .replace(/\\'/g, "'");
-
-    const matches = JSON.parse(jsonStr);
+    const data = await res.json();
+    const matches = data?.dates;
+    if (!Array.isArray(matches)) return null;
 
     // Only return completed matches with valid xG
     return matches
