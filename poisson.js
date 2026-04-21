@@ -113,21 +113,31 @@ function regressToMean(probs, confidence) {
 
 // Predict match from raw stats
 // confidence = min(matchesPlayed / 10, 1.0) passed in from computeTeamStats
-function predictMatch(homeStats, awayStats, leagueAvg, confidence = 1.0) {
+// maxTotalLambda (optional): if λ_h + λ_a exceeds this, scale both down proportionally.
+//   Upstream passes the xG-blend sanity cap here — prevents multiplicative factor
+//   stacking (Elo × form × rest × attack × weak-defence) from producing lambdas that
+//   exceed what a direct xG blend of the two teams would predict.
+function predictMatch(homeStats, awayStats, leagueAvg, confidence = 1.0, maxTotalLambda = null) {
   const HOME_ADVANTAGE = 1.15; // ~15% home boost (football average)
 
-  const lambdaHome = expectedGoals(
+  let lambdaHome = expectedGoals(
     homeStats.attackStrength,
     awayStats.defenceWeakness,
     leagueAvg,
     HOME_ADVANTAGE
   );
-  const lambdaAway = expectedGoals(
+  let lambdaAway = expectedGoals(
     awayStats.attackStrength,
     homeStats.defenceWeakness,
     leagueAvg,
     1.0
   );
+
+  if (maxTotalLambda && (lambdaHome + lambdaAway) > maxTotalLambda) {
+    const scale = maxTotalLambda / (lambdaHome + lambdaAway);
+    lambdaHome *= scale;
+    lambdaAway *= scale;
+  }
 
   const rawProbs = matchProbabilities(lambdaHome, lambdaAway);
 

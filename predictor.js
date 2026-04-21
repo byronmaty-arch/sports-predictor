@@ -113,13 +113,23 @@ async function analyzMatch(homeTeamName, awayTeamName, options = {}) {
     * awayRestFactor
     * (awayInjuryFactor?.defenceMultiplier ?? 1);
 
-  // 4. Run Poisson model with regression to mean
+  // 4. Run Poisson model with regression to mean.
+  //    xG-blend sanity cap prevents multiplicative factor stacking (Elo × form ×
+  //    rest × strength) from producing totals beyond what a direct xG blend of
+  //    the two teams would predict. 1.25× gives headroom for legitimate strong-
+  //    vs-weak fixtures without allowing "Bayern-style" inflation (see CLAUDE.md).
+  const XG_BLEND_SANITY_MULT = 1.25;
+  const blendHome = (homeStats.avgScored   + awayStats.avgConceded) / 2;
+  const blendAway = (awayStats.avgScored   + homeStats.avgConceded) / 2;
+  const maxTotalLambda = (blendHome + blendAway) * XG_BLEND_SANITY_MULT;
+
   const confidence = (homeStats.confidence + awayStats.confidence) / 2;
   const prediction = predictMatch(
     { attackStrength: homeAttack, defenceWeakness: homeDefence },
     { attackStrength: awayAttack, defenceWeakness: awayDefence },
     LEAGUE_AVG_GOALS,
-    confidence
+    confidence,
+    maxTotalLambda
   );
 
   // 5. Apply H2H adjustment (15% weight if we have ≥3 meetings)

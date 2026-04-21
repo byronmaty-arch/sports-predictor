@@ -554,21 +554,51 @@ function computeTeamStats(matches, teamId, xgData = null) {
   const played = wins + draws + losses;
   const hasXG  = xgTotalWeight > 0 && xgData && xgData.length >= 5;
 
-  // Overall averages (xG preferred)
-  const avgScored   = hasXG ? weightedXgFor     / xgTotalWeight : weightedScored   / totalWeight;
-  const avgConceded = hasXG ? weightedXgAgainst / xgTotalWeight : weightedConceded / totalWeight;
+  // Season-wide xG averages across the full Understat sample (usually ~30 matches).
+  // Used to blend with recent-decayed figures so that a favourable/unfavourable
+  // recent run of 10 games can't over- or under-state a team's true rate.
+  // Example: Girona season xGA/g = 1.79 but last-10 decayed = 1.5 — the blend
+  // keeps the defensive weakness visible instead of pricing it out.
+  let seasonXgFor = null, seasonXgAgainst = null;
+  if (hasXG && xgData.length >= 10) {
+    const n = xgData.length;
+    seasonXgFor     = xgData.reduce((s, m) => s + m.xgFor,     0) / n;
+    seasonXgAgainst = xgData.reduce((s, m) => s + m.xgAgainst, 0) / n;
+  }
 
-  // Home-specific averages
-  const homeAvgScored   = homeXgW > 0 ? homeXgFor     / homeXgW
+  // Blend recent-decayed rate with season-wide rate. Season weight grows as recent
+  // sample shrinks: 50/50 at 10+ matches, tilting toward season below that.
+  const blendWithSeason = (recent, season, recentSamples) => {
+    if (season == null) return recent;
+    const recentWeight = Math.min(recentSamples / 10, 1.0) * 0.5; // max 0.5
+    return recent * recentWeight + season * (1 - recentWeight);
+  };
+
+  // Overall averages (xG preferred, blended with season-wide when available)
+  const recentAvgScored   = hasXG ? weightedXgFor     / xgTotalWeight : weightedScored   / totalWeight;
+  const recentAvgConceded = hasXG ? weightedXgAgainst / xgTotalWeight : weightedConceded / totalWeight;
+  const avgScored   = blendWithSeason(recentAvgScored,   seasonXgFor,     played);
+  const avgConceded = blendWithSeason(recentAvgConceded, seasonXgAgainst, played);
+
+  // Venue-split match counts (sample reliability for home/away rates)
+  const homeMatches = sorted.filter(m => m.homeTeam.id === teamId && m.score.fullTime.home !== null).length;
+  const awayMatches = sorted.filter(m => m.awayTeam.id === teamId && m.score.fullTime.home !== null).length;
+
+  // Home-specific averages (blended against season xG when venue sample available)
+  const rawHomeScored   = homeXgW > 0 ? homeXgFor     / homeXgW
                         : homeWeight > 0 ? homeScored  / homeWeight : avgScored;
-  const homeAvgConceded = homeXgW > 0 ? homeXgAgainst / homeXgW
+  const rawHomeConceded = homeXgW > 0 ? homeXgAgainst / homeXgW
                         : homeWeight > 0 ? homeConceded / homeWeight : avgConceded;
+  const homeAvgScored   = blendWithSeason(rawHomeScored,   seasonXgFor,     homeMatches);
+  const homeAvgConceded = blendWithSeason(rawHomeConceded, seasonXgAgainst, homeMatches);
 
   // Away-specific averages
-  const awayAvgScored   = awayXgW > 0 ? awayXgFor     / awayXgW
+  const rawAwayScored   = awayXgW > 0 ? awayXgFor     / awayXgW
                         : awayWeight > 0 ? awayScored  / awayWeight : avgScored;
-  const awayAvgConceded = awayXgW > 0 ? awayXgAgainst / awayXgW
+  const rawAwayConceded = awayXgW > 0 ? awayXgAgainst / awayXgW
                         : awayWeight > 0 ? awayConceded / awayWeight : avgConceded;
+  const awayAvgScored   = blendWithSeason(rawAwayScored,   seasonXgFor,     awayMatches);
+  const awayAvgConceded = blendWithSeason(rawAwayConceded, seasonXgAgainst, awayMatches);
 
   return {
     played, wins, draws, losses,

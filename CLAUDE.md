@@ -129,6 +129,27 @@ MIN_HOME_WIN_FOR_DC_HEDGE    = 0.45   // DC hedge needs homeWin ≥45%
 OVER_XG_FLOOR = { over15: 2.5, over25: 3.3, over35: 4.2 }
 ```
 
+### Lambda sanity cap (predictor.js)
+
+Caps multiplicative factor stacking (Elo × form × rest × attack × weak-defence)
+from producing totals beyond what a direct two-team xG blend would predict.
+
+```
+XG_BLEND_SANITY_MULT = 1.25   // in predictor.js
+// blend  = (home.xg + away.xga)/2 + (away.xg + home.xga)/2
+// if  λ_home + λ_away  >  blend × 1.25  →  scale both lambdas proportionally
+```
+
+### Season-blend on xG rates (fetcher.js)
+
+`computeTeamStats` blends recent-decayed xG averages with the full-season
+Understat sample (when ≥10 matches available). Weight:
+`recent = min(played/10, 1.0) × 0.5` (max 0.5 recent, min 0.5 season).
+Applied to overall avg and home/away splits — prevents a favourable/unfavourable
+10-game run from hiding a team's true attacking or defensive rate. Example:
+Girona 2025/26 season xGA = 1.79 but a 10-game sample trended to 1.5;
+blend keeps the defensive weakness visible.
+
 ---
 
 ## What has been built (chronological, abridged)
@@ -165,10 +186,12 @@ Derived from `git log`. Highlights only — read the log for full context.
 ## What's in progress / known issues
 
 - **No automated tests.** Every change is validated by hand via dryrun scripts.
-- **Bayern-style lambda inflation:** high-scoring Bundesliga matchups still
-  produce unrealistic raw lambdas (e.g. 6.4 for Bayern vs Stuttgart); display
-  is capped at 2.5 for most-likely score, but Over 3.5 probabilities may still
-  be optimistic. Watch for this when the model picks O3.5.
+- **Bayern-style lambda inflation:** mitigated by the `XG_BLEND_SANITY_MULT`
+  cap in `predictor.js` — totals can no longer exceed 1.25× the two-team xG
+  blend. Residual risk: the cap still allows 25% headroom, so extreme
+  strong-vs-weak fixtures may still be above the pure blend. If you see an
+  O3.5 pick on a match where one team is markedly weaker, inspect the
+  pre-cap and post-cap lambdas before trusting it.
 - **API keys hardcoded in `config.js`** as fallbacks — should be env-only in prod.
 - **`backtest.js` has uncommitted local changes** across sessions — keep scope
   clean when committing to avoid pulling unrelated diffs in.
@@ -181,8 +204,9 @@ Originally raised during 18/04 failure analysis. Address when user requests:
 
 1. **Market-disagreement filter** — use `valueAnalysis` as a sanity check:
    skip picks where our prob diverges sharply from the bookmaker's implied odds.
-2. **Venue-split minimum** — require ≥6 home/away matches before trusting the
-   split stat (currently uses anything, even small samples).
+2. **Venue-split minimum** — partially addressed by the season-blend weighting
+   in `computeTeamStats` (small venue sample → season xG dominates). Consider
+   a hard floor of ≥6 venue matches before using the split stat at all.
 3. **Wire injuries into the slip loop** — `/predict` accepts `--home-out` flags,
    but `generateDailySlip` doesn't pull injury data per fixture.
 4. **Under 2.5 pick track** — currently only picks Overs; add a symmetric
