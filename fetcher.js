@@ -245,15 +245,15 @@ const FIXTURE_LEAGUE_DELAY = 7000; // 7s between league queries (free tier: 10 r
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Fetch today's fixtures across all covered leagues (for daily slip)
+// Fetch fixtures for a given date (default: today in UTC) across all covered leagues.
 // Queries each competition individually — the general /matches endpoint is unreliable on free tier
-async function getTodaysFixtures() {
-  const today = new Date().toISOString().split('T')[0];
+async function getTodaysFixtures(date) {
+  const target = date || new Date().toISOString().split('T')[0];
   const all = [];
 
   for (let i = 0; i < FIXTURE_LEAGUES.length; i++) {
     const code = FIXTURE_LEAGUES[i];
-    const data = await fdGet(`/competitions/${code}/matches?status=SCHEDULED&dateFrom=${today}&dateTo=${today}`);
+    const data = await fdGet(`/competitions/${code}/matches?status=SCHEDULED&dateFrom=${target}&dateTo=${target}`);
     if (data && data.matches) {
       const fixtures = data.matches
         .filter(m => TEAM_ID_TO_KEY[m.homeTeam.id] && TEAM_ID_TO_KEY[m.awayTeam.id])

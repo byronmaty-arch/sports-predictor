@@ -47,27 +47,28 @@ app.listen(PORT, () => {
 
 // ─── Daily slip helper ────────────────────────────────────────────────────────
 
-async function sendDailySlip(chatId, { notifyWhatsApp = false } = {}) {
+async function sendDailySlip(chatId, { notifyWhatsApp = false, date = null } = {}) {
   try {
     // Check for fixtures first — respond immediately if none found
-    const fixtures = await getTodaysFixtures();
+    const fixtures = await getTodaysFixtures(date);
+    const dayLabel = date ? date : 'today';
 
     if (!fixtures.length) {
-      const msg = `⚽ <b>No matches found today.</b>\nNo fixtures scheduled in covered leagues. Check back tomorrow!`;
+      const msg = `⚽ <b>No matches found for ${dayLabel}.</b>\nNo fixtures scheduled in covered leagues.`;
       await bot.sendMessage(chatId, msg, { parse_mode: 'HTML' });
       if (notifyWhatsApp && whatsAppConfigured()) {
-        await sendWhatsApp('⚽ No matches found today. Check back tomorrow!');
+        await sendWhatsApp(`⚽ No matches found for ${dayLabel}.`);
       }
       return;
     }
 
     // Fixtures found — show loading message then analyse
     const statusMsg = await bot.sendMessage(chatId,
-      `⏳ <b>Generating today's betting slip...</b>\nFound <b>${fixtures.length}</b> fixture(s). Analysing each match.\nThis takes ~3 minutes due to API rate limits. I'll update this message when done.`,
+      `⏳ <b>Generating betting slip for ${dayLabel}...</b>\nFound <b>${fixtures.length}</b> fixture(s). Analysing each match.\nThis takes ~3 minutes due to API rate limits. I'll update this message when done.`,
       { parse_mode: 'HTML' }
     );
 
-    const slip = await generateDailySlip();
+    const slip = await generateDailySlip(date);
     const sections = formatSlipSections(slip);
 
     // Send slip as multiple messages (one per section) to stay under Telegram's 4096 char limit.
@@ -125,10 +126,14 @@ bot.onText(/\/debug (.+)/i, async (msg, match) => {
   bot.sendMessage(msg.chat.id, lines.join('\n'), { parse_mode: 'HTML' });
 });
 
-// ─── /slip — generate today's betting slip on demand ─────────────────────────
+// ─── /slip [YYYY-MM-DD] — generate betting slip on demand (defaults to today)
 
-bot.onText(/\/slip/, async (msg) => {
-  await sendDailySlip(msg.chat.id);
+bot.onText(/^\/slip(?:@\w+)?(?:\s+(\S+))?\s*$/, async (msg, match) => {
+  const arg = match[1];
+  if (arg && !/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
+    return bot.sendMessage(msg.chat.id, `❌ Invalid date. Use <code>/slip YYYY-MM-DD</code> (e.g. <code>/slip 2026-04-27</code>) or just <code>/slip</code> for today.`, { parse_mode: 'HTML' });
+  }
+  await sendDailySlip(msg.chat.id, { date: arg || null });
 });
 
 // ─── /predict [Home] vs [Away] ────────────────────────────────────────────────

@@ -104,14 +104,14 @@ function buildOverReason(result, overProbs) {
 
 // ─── Main slip generator ──────────────────────────────────────────────────────
 
-async function generateDailySlip() {
-  const fixtures = await getTodaysFixtures();
+async function generateDailySlip(date) {
+  const fixtures = await getTodaysFixtures(date);
 
   if (!fixtures.length) {
-    return { fixtures: [], highConfidence: [], hedges: [], overs: [], analyzedCount: 0, noFixtures: true };
+    return { fixtures: [], highConfidence: [], hedges: [], overs: [], analyzedCount: 0, noFixtures: true, targetDate: date };
   }
 
-  console.log(`[slip] Found ${fixtures.length} fixture(s) today. Analyzing...`);
+  console.log(`[slip] Found ${fixtures.length} fixture(s)${date ? ` for ${date}` : ' today'}. Analyzing...`);
 
   const results = [];
 
@@ -226,7 +226,7 @@ async function generateDailySlip() {
     }
   }
 
-  return { fixtures, highConfidence, hedges, overs, analyzedCount: results.length };
+  return { fixtures, highConfidence, hedges, overs, analyzedCount: results.length, targetDate: date };
 }
 
 module.exports = { generateDailySlip };

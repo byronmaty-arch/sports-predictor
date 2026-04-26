@@ -13,8 +13,9 @@ European leagues (EPL, La Liga, Serie A, Bundesliga, Ligue 1). Each morning at
 08:00 EAT (05:00 UTC) it pulls today's fixtures, runs each through a
 Poisson + Dixon–Coles model enriched with Elo, xG, form, rest and injuries,
 and posts a categorised slip (High Confidence / Double Chance hedges / Goals).
-Also supports on-demand `/predict`, `/slip`, `/debug` commands and an optional
-WhatsApp mirror via Twilio.
+Also supports on-demand `/predict`, `/slip [YYYY-MM-DD]`, `/debug` commands
+and an optional WhatsApp mirror via Twilio. `/slip` defaults to today; pass a
+date to generate a slip for a future fixture day.
 
 Deployed on **Railway** in webhook mode (not polling).
 
@@ -179,7 +180,7 @@ Derived from `git log`. Highlights only — read the log for full context.
 - xG data flowing correctly (verified 19/04: all 14 fixtures, both teams resolve)
 - Three pick-safety filters active and correctly logging vetoes (`[slip] SKIP ...`)
 - Message-length splitting
-- `/predict`, `/slip`, `/debug`, `/quick`, plain-text "Team vs Team" handlers
+- `/predict`, `/slip [YYYY-MM-DD]`, `/debug`, `/quick`, plain-text "Team vs Team" handlers
 
 ---
 

@@ -149,8 +149,9 @@ function formatHelp() {
   return `🤖 <b>Sports Predictor Bot</b>
 
 <b>Commands:</b>
-/slip
-  → Auto-fetch today's fixtures &amp; generate daily betting slip
+/slip [YYYY-MM-DD]
+  → Generate betting slip (defaults to today; pass a date for a future day)
+  → Example: <code>/slip 2026-04-27</code>
   → Picks: High Confidence (≥65%), Hedges (≥80% DC), Overs (≥75%)
   → Also sent automatically every day at 08:00 EAT
 
@@ -203,8 +204,10 @@ function formatQuickPredict(homeTeam, awayTeam, prediction) {
 
 function formatSlip(slip) {
   const lines = [];
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('en-GB', {
+  const headerDate = slip.targetDate
+    ? new Date(`${slip.targetDate}T12:00:00+03:00`)
+    : new Date();
+  const dateStr = headerDate.toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'short', year: 'numeric',
     timeZone: 'Africa/Kampala',
   });
@@ -369,8 +372,10 @@ function kickoffEAT(utcDate) {
 //   [1] Hedge / Double Chance picks  (omitted if empty)
 //   [2] Goals / Over picks + footer  (omitted if empty)
 function formatSlipSections(slip) {
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('en-GB', {
+  const headerDate = slip.targetDate
+    ? new Date(`${slip.targetDate}T12:00:00+03:00`)
+    : new Date();
+  const dateStr = headerDate.toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'short', year: 'numeric',
     timeZone: 'Africa/Kampala',
   });
@@ -382,11 +387,12 @@ function formatSlipSections(slip) {
     `⚽ Analysed <b>${slip.analyzedCount}</b> fixture(s)`,
   ];
 
+  const dayWord = slip.targetDate ? 'on this date' : 'today';
   if (slip.noFixtures) {
-    return [headerLines.join('\n') + '\n\n⚠️ No fixtures found today in covered leagues.\nUse /predict [Home] vs [Away] for manual predictions.'];
+    return [headerLines.join('\n') + `\n\n⚠️ No fixtures found ${dayWord} in covered leagues.\nUse /predict [Home] vs [Away] for manual predictions.`];
   }
   if (!slip.highConfidence.length && !slip.hedges.length && !slip.overs.length) {
-    return [headerLines.join('\n') + '\n\n⚠️ No picks meet confidence thresholds today.\nAll matches are too close to call — skip today or use /predict for details.'];
+    return [headerLines.join('\n') + `\n\n⚠️ No picks meet confidence thresholds ${dayWord}.\nAll matches are too close to call — skip or use /predict for details.`];
   }
 
   const sections = [];
